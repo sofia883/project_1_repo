@@ -65,7 +65,7 @@ class _LoginPageState extends State<LoginPage> {
 
   void _navigateToHome() {
     Navigator.pushReplacement(
-        context, MaterialPageRoute(builder: (context) => ViewItemsScreen()));
+        context, MaterialPageRoute(builder: (context) => HomeScreen()));
   }
 
   @override

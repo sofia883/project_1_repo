@@ -34,7 +34,7 @@ class MyApp extends StatelessWidget {
           bodyMedium: TextStyle(color: Colors.black54),
         ),
       ),
-      home: ViewItemsScreen(),
+      home: HomeScreen(),
     );
   }
 }
