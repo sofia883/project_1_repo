@@ -20,6 +20,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Second-hand Marketplace',
       theme: ThemeData(
         primarySwatch: createMaterialColor(Color(0xFF90CAF9)), // Light Blue

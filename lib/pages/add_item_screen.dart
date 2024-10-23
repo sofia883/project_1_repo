@@ -1,10 +1,10 @@
-// First, ensure you have these imports at the top
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart' as firebase_storage;
 import 'package:path/path.dart' as path;
+import 'package:intl_phone_number_input/intl_phone_number_input.dart'; // Import the package
 
 class AddItemScreen extends StatefulWidget {
   const AddItemScreen({Key? key}) : super(key: key);
@@ -20,21 +20,37 @@ class _AddItemScreenState extends State<AddItemScreen> {
   final _descriptionController = TextEditingController();
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
-  final _scrollController = ScrollController();
+  final _brandController = TextEditingController();
+  final _warrantyController = TextEditingController();
 
   String _selectedCategory = 'Cars';
   List<File> _selectedImages = [];
   bool _isLoading = false;
 
+  PhoneNumber? _phoneNumber; // Declare PhoneNumber variable
   final List<String> _categories = [
+    'All',
     'Cars',
-    'Chairs',
-    'Shoes',
     'Electronics',
+    'Fashion',
+    'Home',
+    'Furniture',
     'Books',
-    'Clothing'
+    'Toys',
+    'Sports',
+    'Beauty',
+    'Health',
+    'Automotive',
+    'Jewelry',
+    'Groceries',
+    'Music',
+    'Pet Supplies',
+    'Garden',
+    'Office Supplies',
+    'Baby Products',
   ];
-  final ImagePicker _picker = ImagePicker(); // Initialize ImagePicker here
+
+  final ImagePicker _picker = ImagePicker();
 
   Future<void> _pickImages() async {
     try {
@@ -57,18 +73,15 @@ class _AddItemScreenState extends State<AddItemScreen> {
 
     try {
       for (File imageFile in _selectedImages) {
-        // Create a unique filename
         String fileName =
             '${DateTime.now().millisecondsSinceEpoch}_${path.basename(imageFile.path)}';
 
-        // Create storage reference
         firebase_storage.Reference ref = firebase_storage
             .FirebaseStorage.instance
             .ref()
             .child('items')
             .child(fileName);
 
-        // Upload the file
         await ref.putFile(
           imageFile,
           firebase_storage.SettableMetadata(
@@ -80,7 +93,6 @@ class _AddItemScreenState extends State<AddItemScreen> {
           ),
         );
 
-        // Get download URL
         String downloadUrl = await ref.getDownloadURL();
         imageUrls.add(downloadUrl);
       }
@@ -96,7 +108,8 @@ class _AddItemScreenState extends State<AddItemScreen> {
     if (!_formKey.currentState!.validate() || _selectedImages.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text('Please fill all fields and add at least one image')),
+            content: Text(
+                'Please fill all required fields and add at least one image')),
       );
       return;
     }
@@ -104,10 +117,8 @@ class _AddItemScreenState extends State<AddItemScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Upload images and get URLs
       List<String> imageUrls = await _uploadImages();
 
-      // Store data in Firestore
       await FirebaseFirestore.instance.collection('items').add({
         'name': _nameController.text.trim(),
         'price': double.parse(_priceController.text.trim()),
@@ -115,6 +126,12 @@ class _AddItemScreenState extends State<AddItemScreen> {
         'category': _selectedCategory,
         'phone': _phoneController.text.trim(),
         'address': _addressController.text.trim(),
+        'brand': _brandController.text.trim().isEmpty
+            ? null
+            : _brandController.text.trim(), // Optional field
+        'warranty': _warrantyController.text.trim().isEmpty
+            ? null
+            : _warrantyController.text.trim(), // Optional field
         'images': imageUrls,
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -228,16 +245,32 @@ class _AddItemScreenState extends State<AddItemScreen> {
               ),
               SizedBox(height: 16),
 
-              TextFormField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                decoration: InputDecoration(
-                  labelText: 'Phone Number',
-                  border: OutlineInputBorder(),
+              InternationalPhoneNumberInput(
+                onInputChanged: (PhoneNumber number) {
+                  print('Phone number: $number'); // Debugging output
+                  _phoneNumber = number; // Update the phone number variable
+                },
+                onInputValidated: (bool isValid) {
+                  print(
+                      isValid ? 'Valid phone number' : 'Invalid phone number');
+                },
+                selectorConfig: const SelectorConfig(
+                  selectorType: PhoneInputSelectorType.DROPDOWN,
                 ),
-                validator: (value) =>
-                    value?.isEmpty ?? true ? 'Required' : null,
+                ignoreBlank: false,
+                autoValidateMode:
+                    AutovalidateMode.disabled, // Disable auto validation
+                selectorTextStyle: TextStyle(color: Colors.black),
+                initialValue:
+                    PhoneNumber(isoCode: 'IN'), // Default to Indian code
+                textFieldController:
+                    _phoneController, // Make sure to use the controller
+                formatInput: true, // Try formatting the input
+                keyboardType: TextInputType.numberWithOptions(
+                    signed: true, decimal: true),
+                inputBorder: OutlineInputBorder(),
               ),
+
               SizedBox(height: 16),
 
               TextFormField(
@@ -273,6 +306,24 @@ class _AddItemScreenState extends State<AddItemScreen> {
               SizedBox(height: 16),
 
               TextFormField(
+                controller: _brandController, // Optional field for brand
+                decoration: InputDecoration(
+                  labelText: 'Brand (Optional)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              SizedBox(height: 16),
+
+              TextFormField(
+                controller: _warrantyController, // Optional field for warranty
+                decoration: InputDecoration(
+                  labelText: 'Warranty (if any, Optional)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              SizedBox(height: 16),
+
+              TextFormField(
                 controller: _descriptionController,
                 maxLines: 4,
                 decoration: InputDecoration(
@@ -286,12 +337,8 @@ class _AddItemScreenState extends State<AddItemScreen> {
 
               ElevatedButton(
                 onPressed: _isLoading ? null : _submitItem,
-                child: _isLoading
-                    ? CircularProgressIndicator(color: Colors.white)
-                    : Text('Submit Item'),
-                style: ElevatedButton.styleFrom(
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                ),
+                child:
+                    _isLoading ? CircularProgressIndicator() : Text('Add Item'),
               ),
             ],
           ),
@@ -302,12 +349,16 @@ class _AddItemScreenState extends State<AddItemScreen> {
 
   void _clearForm() {
     _nameController.clear();
-    _priceController.clear();
+    _priceController.clear;
+
     _descriptionController.clear();
     _phoneController.clear();
     _addressController.clear();
+    _brandController.clear(); // Clear brand
+    _warrantyController.clear(); // Clear warranty
+    _selectedImages.clear();
     setState(() {
-      _selectedImages = [];
+      _selectedCategory = 'Cars'; // Reset category
     });
   }
 }
