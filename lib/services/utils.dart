@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
+import 'package:csc_picker/csc_picker.dart';
 
 class ItemDetailsPage extends StatelessWidget {
   final Map<String, dynamic> item;
@@ -163,10 +164,12 @@ class FilterService {
     this.isPriceFilterActive = false,
     this.selectedCategory,
   });
+
   RangeValues priceRange;
   bool isPriceFilterActive;
   String? selectedCategory;
   String? selectedCity;
+  String? selectedState;
   String? selectedCountry;
   String? selectedTimeFrame;
   bool isLoading = false;
@@ -177,8 +180,9 @@ class FilterService {
     'This Month': Duration(days: 30),
     'Last 6 Months': Duration(days: 180),
     'Last Year': Duration(days: 365),
-    'Older': Duration(days: 365), // Special case for older items
+    'Older': Duration(days: 365),
   };
+
   void dispose() {
     _loadingController.close();
   }
@@ -186,11 +190,9 @@ class FilterService {
   void reset() {
     priceRange = const RangeValues(0, 1000);
     isPriceFilterActive = false;
-  }
-
-  Future<QuerySnapshot> fetchFilteredResults() async {
-    Query query = getFilteredQuery();
-    return await query.limit(20).get();
+    selectedCountry = null;
+    selectedState = null;
+    selectedCity = null;
   }
 
   Query getFilteredQuery() {
@@ -209,11 +211,14 @@ class FilterService {
     }
 
     // Apply location filters
-    if (selectedCity != null) {
-      query = query.where('address.city', isEqualTo: selectedCity);
-    }
     if (selectedCountry != null) {
       query = query.where('address.country', isEqualTo: selectedCountry);
+    }
+    if (selectedState != null) {
+      query = query.where('address.state', isEqualTo: selectedState);
+    }
+    if (selectedCity != null) {
+      query = query.where('address.city', isEqualTo: selectedCity);
     }
 
     // Apply time filter
@@ -234,8 +239,9 @@ class FilterService {
   Future<void> showFilterDialog(BuildContext context) async {
     RangeValues tempPriceRange = priceRange;
     bool tempIsPriceFilterActive = isPriceFilterActive;
-    String? tempCity = selectedCity;
     String? tempCountry = selectedCountry;
+    String? tempState = selectedState;
+    String? tempCity = selectedCity;
     String? tempTimeFrame = selectedTimeFrame;
 
     await showDialog(
@@ -269,22 +275,51 @@ class FilterService {
                     SizedBox(height: 16),
                     Text('Location',
                         style: TextStyle(fontWeight: FontWeight.bold)),
-                    TextField(
-                      decoration: InputDecoration(
-                        labelText: 'City',
-                        border: OutlineInputBorder(),
-                      ),
-                      onChanged: (value) => setState(
-                          () => tempCity = value.isEmpty ? null : value),
-                    ),
                     SizedBox(height: 8),
-                    TextField(
-                      decoration: InputDecoration(
-                        labelText: 'Country',
-                        border: OutlineInputBorder(),
+                    // CSC Picker Widget
+                    CSCPicker(
+                      layout: Layout.vertical,
+                      flagState: CountryFlag.ENABLE,
+                      dropdownDecoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey),
                       ),
-                      onChanged: (value) => setState(
-                          () => tempCountry = value.isEmpty ? null : value),
+                      disabledDropdownDecoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      countryDropdownLabel: "Select Country",
+                      stateDropdownLabel: "Select State",
+                      cityDropdownLabel: "Select City",
+
+                      selectedItemStyle: TextStyle(
+                        color: Colors.black,
+                        fontSize: 14,
+                      ),
+                      dropdownHeadingStyle: TextStyle(
+                        color: Colors.black,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      dropdownItemStyle: TextStyle(
+                        color: Colors.black,
+                        fontSize: 14,
+                      ),
+                      //                 defaultCountry: tempCountry != null
+                      // ? DefaultCountry.values.firstWhere(
+                      //     (c) => c.toString().split('.').last == tempCountry,
+                      //     orElse: () => DefaultCountry.INDIA) // Changed to INDIA
+                      // : DefaultCountry.INDIA, // Changed to INDIA
+
+                      onCountryChanged: (country) {
+                        setState(() => tempCountry = country);
+                      },
+                      onStateChanged: (state) {
+                        setState(() => tempState = state);
+                      },
+                      onCityChanged: (city) {
+                        setState(() => tempCity = city);
+                      },
                     ),
                     SizedBox(height: 16),
                     Text('Time Frame',
@@ -313,8 +348,9 @@ class FilterService {
                     setState(() {
                       tempPriceRange = const RangeValues(0, 1000);
                       tempIsPriceFilterActive = false;
-                      tempCity = null;
                       tempCountry = null;
+                      tempState = null;
+                      tempCity = null;
                       tempTimeFrame = null;
                     });
                   },
@@ -329,23 +365,17 @@ class FilterService {
                   ),
                   child: Text('Apply'),
                   onPressed: () async {
-                    // Apply filters immediately
+                    // Apply filters
                     priceRange = tempPriceRange;
                     isPriceFilterActive = tempIsPriceFilterActive;
-                    selectedCity = tempCity;
                     selectedCountry = tempCountry;
+                    selectedState = tempState;
+                    selectedCity = tempCity;
                     selectedTimeFrame = tempTimeFrame;
 
-                    // Close dialog
                     Navigator.pop(context);
-
-                    // Start loading indicator
                     _loadingController.add(true);
-
-                    // Wait for 2 seconds
                     await Future.delayed(Duration(seconds: 2));
-
-                    // Stop loading indicator
                     _loadingController.add(false);
                   },
                 ),
@@ -357,49 +387,42 @@ class FilterService {
     );
   }
 
-  Widget buildContentState(
-      BuildContext context, AsyncSnapshot<QuerySnapshot> snapshot) {
-    // Check the loading state first
-    if (isLoading) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Filtering items...',
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 16,
-              ),
-            ),
-          ],
-        ),
-      );
+  String _getEmptyStateMessage() {
+    List<String> conditions = [];
+
+    if (selectedCategory != null && selectedCategory != 'All') {
+      conditions.add(selectedCategory!);
     }
 
-    if (snapshot.hasError) {
-      return Center(
-        child: Text(
-          'Error loading items. Please try again.',
-          style: TextStyle(color: Colors.red),
-        ),
-      );
+    if (selectedCountry != null) {
+      conditions.add('in $selectedCountry');
+      if (selectedState != null) {
+        conditions.add('$selectedState');
+        if (selectedCity != null) {
+          conditions.add('$selectedCity');
+        }
+      }
     }
 
-    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-      return buildEmptyState();
+    if (isPriceFilterActive) {
+      conditions.add(
+          'price range \$${priceRange.start.toStringAsFixed(0)} - \$${priceRange.end.toStringAsFixed(0)}');
     }
 
-    return ListView.builder(
-      itemCount: snapshot.data!.docs.length,
-      itemBuilder: (context, index) {
-        // Your existing item builder code
-      },
-    );
+    if (conditions.isEmpty) {
+      return 'No items found';
+    }
+
+    return 'No items found with ${conditions.join(", ")}';
+  }
+
+  void resetAllFilters() {
+    priceRange = const RangeValues(0, 1000);
+    isPriceFilterActive = false;
+    selectedCity = null;
+    selectedCountry = null;
+    selectedTimeFrame = null;
+    _loadingController.add(false);
   }
 
   Widget buildEmptyState() {
@@ -407,11 +430,10 @@ class FilterService {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Image.asset(
-            'assets/images/empty_screen.jpg',
-            height: 200,
-            width: 200,
-            fit: BoxFit.contain,
+          Icon(
+            Icons.search_off,
+            size: 64,
+            color: Colors.grey[400],
           ),
           SizedBox(height: 16),
           Text(
@@ -426,27 +448,5 @@ class FilterService {
         ],
       ),
     );
-  }
-
-  void resetAllFilters() {
-    priceRange = const RangeValues(0, 1000);
-    isPriceFilterActive = false;
-    selectedCity = null;
-    selectedCountry = null;
-    selectedTimeFrame = null;
-    _loadingController.add(false);
-  }
-
-  String _getEmptyStateMessage() {
-    if (selectedCategory != null && selectedCategory != 'All') {
-      if (isPriceFilterActive) {
-        return 'No $selectedCategory items found in price range \$${priceRange.start.toStringAsFixed(0)} - \$${priceRange.end.toStringAsFixed(0)}';
-      }
-      return 'No $selectedCategory items found';
-    }
-    if (isPriceFilterActive) {
-      return 'No items found in price range \$${priceRange.start.toStringAsFixed(0)} - \$${priceRange.end.toStringAsFixed(0)}';
-    }
-    return 'No items found';
   }
 }

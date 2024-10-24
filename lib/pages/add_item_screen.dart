@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart' as firebase_storage;
 import 'package:path/path.dart' as path;
 import 'package:intl_phone_number_input/intl_phone_number_input.dart'; // Import the package
 import 'package:csc_picker/csc_picker.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class AddItemScreen extends StatefulWidget {
   const AddItemScreen({Key? key}) : super(key: key);
@@ -149,6 +150,13 @@ class _AddItemScreenState extends State<AddItemScreen> {
     setState(() => _isLoading = true);
 
     try {
+      // Get current user
+      final User? currentUser = FirebaseAuth.instance.currentUser;
+
+      if (currentUser == null) {
+        throw Exception('No user logged in');
+      }
+
       List<String> imageUrls = await _uploadImages();
 
       await FirebaseFirestore.instance.collection('items').add({
@@ -165,6 +173,10 @@ class _AddItemScreenState extends State<AddItemScreen> {
             : _warrantyController.text.trim(),
         'images': imageUrls,
         'createdAt': FieldValue.serverTimestamp(),
+        'userId': currentUser.uid, // Add this line to store user ID
+        'userPhone':
+            _phoneController.text.trim(), // Add this line to store phone
+        'status': 'Active', // Add this line to set initial status
         'address': {
           'street': _addressController.text.trim(),
           'city': selectedCity,
@@ -189,7 +201,6 @@ class _AddItemScreenState extends State<AddItemScreen> {
     }
   }
 
-  // Add this new widget method for improved phone input
   Widget _buildPhoneInput() {
     return Container(
       decoration: BoxDecoration(

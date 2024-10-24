@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'add_item_screen.dart';
 import 'package:project_1/services/search_delegate.dart';
 import 'package:project_1/services/utils.dart';
+import 'profile_page.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -71,6 +72,12 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.filter_list, color: Colors.black),
             onPressed: () => _showFilterDialog(context),
           ),
+          IconButton(
+              icon: Icon(Icons.person, color: Colors.black),
+              onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => ProfileScreen()),
+                  )),
           IconButton(
             icon: Icon(Icons.add, color: Colors.black),
             onPressed: () => Navigator.push(
@@ -163,9 +170,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 childAspectRatio: 0.75,
               ),
               itemCount: items.length,
+              // In _HomeScreenState class, update the _buildFilteredItemsGrid() method
+// Replace the item builder section with this updated code:
+
               itemBuilder: (context, index) {
                 final item = items[index].data() as Map<String, dynamic>;
                 final images = List<String>.from(item['images'] ?? []);
+                final timestamp = item['createdAt'] as Timestamp?;
+                final formattedDate = timestamp != null
+                    ? '${timestamp.toDate().day}/${timestamp.toDate().month}/${timestamp.toDate().year}'
+                    : 'No date';
 
                 return Container(
                   decoration: BoxDecoration(
@@ -203,7 +217,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              item['title'] ?? 'No Title',
+                              item['name'] ??
+                                  'No Title', // Changed from 'title' to 'name'
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 16,
@@ -218,6 +233,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                 color: Colors.orange,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 14,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              formattedDate,
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 12,
                               ),
                             ),
                           ],
