@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart' as firebase_storage;
 import 'package:path/path.dart' as path;
 import 'package:intl_phone_number_input/intl_phone_number_input.dart'; // Import the package
+import 'package:csc_picker/csc_picker.dart';
 
 class AddItemScreen extends StatefulWidget {
   const AddItemScreen({Key? key}) : super(key: key);
@@ -22,10 +23,16 @@ class _AddItemScreenState extends State<AddItemScreen> {
   final _addressController = TextEditingController();
   final _brandController = TextEditingController();
   final _warrantyController = TextEditingController();
-
+  final _cityController = TextEditingController();
+  final _stateController = TextEditingController();
+  final _countryController = TextEditingController();
+  final _postalCodeController = TextEditingController();
   String _selectedCategory = 'Cars';
   List<File> _selectedImages = [];
   bool _isLoading = false;
+  String? selectedCountry;
+  String? selectedState;
+  String? selectedCity;
 
   PhoneNumber? _phoneNumber; // Declare PhoneNumber variable
   final List<String> _categories = [
@@ -51,7 +58,6 @@ class _AddItemScreenState extends State<AddItemScreen> {
   ];
 
   final ImagePicker _picker = ImagePicker();
-
   Future<void> _pickImages() async {
     try {
       final List<XFile>? pickedFiles = await _picker.pickMultiImage();
@@ -64,6 +70,23 @@ class _AddItemScreenState extends State<AddItemScreen> {
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error picking images: $e')),
+      );
+    }
+  }
+
+// Update the camera method to match the style:
+  Future<void> _takePicture() async {
+    try {
+      final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
+
+      if (photo != null) {
+        setState(() {
+          _selectedImages.add(File(photo.path));
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error taking picture: $e')),
       );
     }
   }
@@ -114,6 +137,15 @@ class _AddItemScreenState extends State<AddItemScreen> {
       return;
     }
 
+    if (selectedCountry == null ||
+        selectedState == null ||
+        selectedCity == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Please select country, state, and city')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -125,15 +157,21 @@ class _AddItemScreenState extends State<AddItemScreen> {
         'description': _descriptionController.text.trim(),
         'category': _selectedCategory,
         'phone': _phoneController.text.trim(),
-        'address': _addressController.text.trim(),
         'brand': _brandController.text.trim().isEmpty
             ? null
-            : _brandController.text.trim(), // Optional field
+            : _brandController.text.trim(),
         'warranty': _warrantyController.text.trim().isEmpty
             ? null
-            : _warrantyController.text.trim(), // Optional field
+            : _warrantyController.text.trim(),
         'images': imageUrls,
         'createdAt': FieldValue.serverTimestamp(),
+        'address': {
+          'street': _addressController.text.trim(),
+          'city': selectedCity,
+          'state': selectedState,
+          'country': selectedCountry,
+          'postalCode': _postalCodeController.text.trim(),
+        },
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -149,6 +187,141 @@ class _AddItemScreenState extends State<AddItemScreen> {
     } finally {
       setState(() => _isLoading = false);
     }
+  }
+
+  // Add this new widget method for improved phone input
+  Widget _buildPhoneInput() {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: InternationalPhoneNumberInput(
+        onInputChanged: (PhoneNumber number) {
+          _phoneNumber = number;
+        },
+        onInputValidated: (bool isValid) {
+          print(isValid ? 'Valid phone number' : 'Invalid phone number');
+        },
+        selectorConfig: SelectorConfig(
+          selectorType: PhoneInputSelectorType.BOTTOM_SHEET,
+          showFlags: true,
+          setSelectorButtonAsPrefixIcon: true,
+          useEmoji: true,
+        ),
+        searchBoxDecoration: InputDecoration(
+          labelText: 'Search by country name or code',
+          border: OutlineInputBorder(),
+          prefixIcon: Icon(Icons.search),
+        ),
+        spaceBetweenSelectorAndTextField: 0,
+        ignoreBlank: false,
+        autoValidateMode: AutovalidateMode.onUserInteraction,
+        selectorTextStyle: TextStyle(
+          color: Colors.black,
+          fontSize: 16,
+        ),
+        initialValue: PhoneNumber(isoCode: 'IN'),
+        textFieldController: _phoneController,
+        formatInput: true,
+        keyboardType: TextInputType.phone,
+        inputBorder: OutlineInputBorder(
+          borderSide: BorderSide.none,
+        ),
+        inputDecoration: InputDecoration(
+          hintText: 'Phone Number',
+          border: InputBorder.none,
+          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        ),
+      ),
+    );
+  }
+
+  // Replace the address TextFormFields with CSC Picker
+  Widget _buildAddressSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Address Details',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        SizedBox(height: 16),
+        CSCPicker(
+          layout: Layout.vertical,
+          flagState: CountryFlag.ENABLE,
+          dropdownDecoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey),
+          ),
+          disabledDropdownDecoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey.shade300),
+          ),
+          countryDropdownLabel: "Select Country",
+          stateDropdownLabel: "Select State",
+          cityDropdownLabel: "Select City",
+          selectedItemStyle: TextStyle(
+            color: Colors.black,
+            fontSize: 14,
+          ),
+          dropdownHeadingStyle: TextStyle(
+            color: Colors.black,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+          dropdownItemStyle: TextStyle(
+            color: Colors.black,
+            fontSize: 14,
+          ),
+          onCountryChanged: (country) {
+            setState(() => selectedCountry = country);
+          },
+          onStateChanged: (state) {
+            setState(() => selectedState = state);
+          },
+          onCityChanged: (city) {
+            setState(() => selectedCity = city);
+          },
+        ),
+        SizedBox(height: 16),
+      ],
+    );
+  }
+
+  Future<void> _showImageSourceDialog() async {
+    await showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Add Image'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(Icons.camera_alt),
+                title: Text('Take Photo'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _takePicture();
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.photo_library),
+                title: Text('Choose from Gallery'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImages();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -171,55 +344,77 @@ class _AddItemScreenState extends State<AddItemScreen> {
                   border: Border.all(color: Colors.grey),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: _selectedImages.isEmpty
-                    ? Center(
-                        child: TextButton.icon(
-                          onPressed: () => _pickImages(),
-                          icon: Icon(Icons.add_photo_alternate),
-                          label: Text('Add Images'),
+                child: Stack(
+                  children: [
+                    // Images ListView
+                    _selectedImages.isEmpty
+                        ? Center(
+                            child: Text('No images selected'),
+                          )
+                        : ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _selectedImages.length,
+                            itemBuilder: (context, index) {
+                              return Stack(
+                                children: [
+                                  Container(
+                                    width: 150,
+                                    margin: EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(8),
+                                      image: DecorationImage(
+                                        image:
+                                            FileImage(_selectedImages[index]),
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 0,
+                                    right: 0,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: IconButton(
+                                        icon: Icon(Icons.remove_circle),
+                                        color: Colors.red,
+                                        onPressed: () {
+                                          setState(() {
+                                            _selectedImages.removeAt(index);
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                    // Add More Images button - Always visible in the corner
+                    Positioned(
+                      bottom: 8,
+                      right: 8,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).primaryColor,
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                      )
-                    : ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: _selectedImages.length + 1,
-                        itemBuilder: (context, index) {
-                          if (index == _selectedImages.length) {
-                            return Center(
-                              child: IconButton(
-                                onPressed: () => _pickImages(),
-                                icon: Icon(Icons.add_photo_alternate),
-                              ),
-                            );
-                          }
-                          return Stack(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.all(8.0),
-                                child: Image.file(
-                                  _selectedImages[index],
-                                  width: 150,
-                                  height: 150,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                              Positioned(
-                                top: 0,
-                                right: 0,
-                                child: IconButton(
-                                  icon: Icon(Icons.remove_circle),
-                                  color: Colors.red,
-                                  onPressed: () {
-                                    setState(() {
-                                      _selectedImages.removeAt(index);
-                                    });
-                                  },
-                                ),
-                              ),
-                            ],
-                          );
-                        },
+                        child: IconButton(
+                          onPressed: _showImageSourceDialog,
+                          icon: Icon(
+                            Icons.add_photo_alternate,
+                            color: Colors.white,
+                          ),
+                          tooltip: 'Add More Images',
+                        ),
                       ),
+                    ),
+                  ],
+                ),
               ),
+
               SizedBox(height: 16),
 
               TextFormField(
@@ -245,44 +440,10 @@ class _AddItemScreenState extends State<AddItemScreen> {
               ),
               SizedBox(height: 16),
 
-              InternationalPhoneNumberInput(
-                onInputChanged: (PhoneNumber number) {
-                  print('Phone number: $number'); // Debugging output
-                  _phoneNumber = number; // Update the phone number variable
-                },
-                onInputValidated: (bool isValid) {
-                  print(
-                      isValid ? 'Valid phone number' : 'Invalid phone number');
-                },
-                selectorConfig: const SelectorConfig(
-                  selectorType: PhoneInputSelectorType.DROPDOWN,
-                ),
-                ignoreBlank: false,
-                autoValidateMode:
-                    AutovalidateMode.disabled, // Disable auto validation
-                selectorTextStyle: TextStyle(color: Colors.black),
-                initialValue:
-                    PhoneNumber(isoCode: 'IN'), // Default to Indian code
-                textFieldController:
-                    _phoneController, // Make sure to use the controller
-                formatInput: true, // Try formatting the input
-                keyboardType: TextInputType.numberWithOptions(
-                    signed: true, decimal: true),
-                inputBorder: OutlineInputBorder(),
-              ),
+              _buildPhoneInput(), // Replace the old phone input with this new method
 
               SizedBox(height: 16),
-
-              TextFormField(
-                controller: _addressController,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  labelText: 'Address',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) =>
-                    value?.isEmpty ?? true ? 'Required' : null,
-              ),
+              _buildAddressSection(),
               SizedBox(height: 16),
 
               DropdownButtonFormField<String>(
@@ -349,16 +510,19 @@ class _AddItemScreenState extends State<AddItemScreen> {
 
   void _clearForm() {
     _nameController.clear();
-    _priceController.clear;
-
+    _priceController.clear();
     _descriptionController.clear();
     _phoneController.clear();
     _addressController.clear();
-    _brandController.clear(); // Clear brand
-    _warrantyController.clear(); // Clear warranty
+    _brandController.clear();
+    _warrantyController.clear();
+    _postalCodeController.clear();
     _selectedImages.clear();
     setState(() {
-      _selectedCategory = 'Cars'; // Reset category
+      _selectedCategory = 'Cars';
+      selectedCountry = null;
+      selectedState = null;
+      selectedCity = null;
     });
   }
 }

@@ -158,17 +158,27 @@ class FilterService {
   final _loadingController = StreamController<bool>.broadcast();
   Stream<bool> get loadingStream => _loadingController.stream;
 
-  RangeValues priceRange;
-  bool isPriceFilterActive;
-  String? selectedCategory;
-  bool isLoading = false;
-
   FilterService({
     this.priceRange = const RangeValues(0, 1000),
     this.isPriceFilterActive = false,
     this.selectedCategory,
   });
+  RangeValues priceRange;
+  bool isPriceFilterActive;
+  String? selectedCategory;
+  String? selectedCity;
+  String? selectedCountry;
+  String? selectedTimeFrame;
+  bool isLoading = false;
 
+  static const Map<String, Duration> timeFrames = {
+    'Last 24 Hours': Duration(hours: 24),
+    'This Week': Duration(days: 7),
+    'This Month': Duration(days: 30),
+    'Last 6 Months': Duration(days: 180),
+    'Last Year': Duration(days: 365),
+    'Older': Duration(days: 365), // Special case for older items
+  };
   void dispose() {
     _loadingController.close();
   }
@@ -186,17 +196,165 @@ class FilterService {
   Query getFilteredQuery() {
     Query query = FirebaseFirestore.instance.collection('items');
 
+    // Apply category filter
     if (selectedCategory != null && selectedCategory != 'All') {
       query = query.where('category', isEqualTo: selectedCategory);
     }
 
+    // Apply price filter
     if (isPriceFilterActive) {
       query = query
           .where('price', isGreaterThanOrEqualTo: priceRange.start)
           .where('price', isLessThanOrEqualTo: priceRange.end);
     }
 
+    // Apply location filters
+    if (selectedCity != null) {
+      query = query.where('address.city', isEqualTo: selectedCity);
+    }
+    if (selectedCountry != null) {
+      query = query.where('address.country', isEqualTo: selectedCountry);
+    }
+
+    // Apply time filter
+    if (selectedTimeFrame != null) {
+      DateTime cutoffDate;
+      if (selectedTimeFrame == 'Older') {
+        cutoffDate = DateTime.now().subtract(Duration(days: 365));
+        query = query.where('createdAt', isLessThan: cutoffDate);
+      } else {
+        cutoffDate = DateTime.now().subtract(timeFrames[selectedTimeFrame]!);
+        query = query.where('createdAt', isGreaterThan: cutoffDate);
+      }
+    }
+
     return query;
+  }
+
+  Future<void> showFilterDialog(BuildContext context) async {
+    RangeValues tempPriceRange = priceRange;
+    bool tempIsPriceFilterActive = isPriceFilterActive;
+    String? tempCity = selectedCity;
+    String? tempCountry = selectedCountry;
+    String? tempTimeFrame = selectedTimeFrame;
+
+    await showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text('Filter Options'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Price Range',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    RangeSlider(
+                      values: tempPriceRange,
+                      min: 0,
+                      max: 1000,
+                      divisions: 20,
+                      labels: RangeLabels(
+                        '\$${tempPriceRange.start.toStringAsFixed(0)}',
+                        '\$${tempPriceRange.end.toStringAsFixed(0)}',
+                      ),
+                      onChanged: (values) => setState(() {
+                        tempPriceRange = values;
+                        tempIsPriceFilterActive = true;
+                      }),
+                    ),
+                    SizedBox(height: 16),
+                    Text('Location',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    TextField(
+                      decoration: InputDecoration(
+                        labelText: 'City',
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (value) => setState(
+                          () => tempCity = value.isEmpty ? null : value),
+                    ),
+                    SizedBox(height: 8),
+                    TextField(
+                      decoration: InputDecoration(
+                        labelText: 'Country',
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (value) => setState(
+                          () => tempCountry = value.isEmpty ? null : value),
+                    ),
+                    SizedBox(height: 16),
+                    Text('Time Frame',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    DropdownButton<String>(
+                      value: tempTimeFrame,
+                      isExpanded: true,
+                      hint: Text('Select Time Frame'),
+                      items: [
+                        DropdownMenuItem(value: null, child: Text('All Time')),
+                        ...timeFrames.keys.map((String time) {
+                          return DropdownMenuItem(
+                              value: time, child: Text(time));
+                        }).toList(),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => tempTimeFrame = value),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  child: Text('Reset'),
+                  onPressed: () {
+                    setState(() {
+                      tempPriceRange = const RangeValues(0, 1000);
+                      tempIsPriceFilterActive = false;
+                      tempCity = null;
+                      tempCountry = null;
+                      tempTimeFrame = null;
+                    });
+                  },
+                ),
+                TextButton(
+                  child: Text('Cancel'),
+                  onPressed: () => Navigator.pop(context),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                  ),
+                  child: Text('Apply'),
+                  onPressed: () async {
+                    // Apply filters immediately
+                    priceRange = tempPriceRange;
+                    isPriceFilterActive = tempIsPriceFilterActive;
+                    selectedCity = tempCity;
+                    selectedCountry = tempCountry;
+                    selectedTimeFrame = tempTimeFrame;
+
+                    // Close dialog
+                    Navigator.pop(context);
+
+                    // Start loading indicator
+                    _loadingController.add(true);
+
+                    // Wait for 2 seconds
+                    await Future.delayed(Duration(seconds: 2));
+
+                    // Stop loading indicator
+                    _loadingController.add(false);
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   Widget buildContentState(
@@ -270,6 +428,15 @@ class FilterService {
     );
   }
 
+  void resetAllFilters() {
+    priceRange = const RangeValues(0, 1000);
+    isPriceFilterActive = false;
+    selectedCity = null;
+    selectedCountry = null;
+    selectedTimeFrame = null;
+    _loadingController.add(false);
+  }
+
   String _getEmptyStateMessage() {
     if (selectedCategory != null && selectedCategory != 'All') {
       if (isPriceFilterActive) {
@@ -281,92 +448,5 @@ class FilterService {
       return 'No items found in price range \$${priceRange.start.toStringAsFixed(0)} - \$${priceRange.end.toStringAsFixed(0)}';
     }
     return 'No items found';
-  }
-
-  Future<void> showFilterDialog(BuildContext context) async {
-    RangeValues tempPriceRange = priceRange;
-    bool tempIsPriceFilterActive = isPriceFilterActive;
-
-    await showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: Text(selectedCategory != null && selectedCategory != 'All'
-                  ? 'Filter $selectedCategory Items by Price'
-                  : 'Filter All Items by Price'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Price Range for ${selectedCategory ?? 'All Items'}',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 8),
-                  RangeSlider(
-                    values: tempPriceRange,
-                    min: 0,
-                    max: 1000,
-                    divisions: 20,
-                    labels: RangeLabels(
-                      '\$${tempPriceRange.start.toStringAsFixed(0)}',
-                      '\$${tempPriceRange.end.toStringAsFixed(0)}',
-                    ),
-                    onChanged: (RangeValues values) {
-                      setState(() {
-                        tempPriceRange = values;
-                        tempIsPriceFilterActive = true;
-                      });
-                    },
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  child: Text('Reset'),
-                  onPressed: () {
-                    setState(() {
-                      tempPriceRange = const RangeValues(0, 1000);
-                      tempIsPriceFilterActive = false;
-                    });
-                  },
-                ),
-                TextButton(
-                  child: Text('Cancel'),
-                  onPressed: () => Navigator.pop(context),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                  ),
-                  child: Text('Apply'),
-                  onPressed: () async {
-                    // Close the dialog first
-                    Navigator.pop(context);
-
-                    // Show loading immediately
-                    isLoading = true;
-                    _loadingController.add(true);
-
-                    // Add artificial delay of 2 seconds
-                    await Future.delayed(Duration(seconds: 2));
-
-                    // Apply the filters
-                    priceRange = tempPriceRange;
-                    isPriceFilterActive = tempIsPriceFilterActive;
-
-                    // Hide loading after everything is done
-                    isLoading = false;
-                    _loadingController.add(false);
-                  },
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
   }
 }

@@ -12,6 +12,10 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   FilterOptions _filterOptions = FilterOptions();
   late FilterService _filterService;
+  bool _isLoadingStateFilter = true;
+
+  bool _isLoading =
+      true; // Add this at the beginning of your widget state class
 
   final List<String> _categories = [
     'All',
@@ -92,12 +96,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildFilteredItemsGrid() {
-    return StreamBuilder<bool>(
-      stream: _filterService.loadingStream,
-      initialData: false,
-      builder: (context, loadingSnapshot) {
-        // Show loading indicator if filter is being applied
-        if (loadingSnapshot.data == true) {
+    return FutureBuilder(
+      future:
+          Future.delayed(Duration(seconds: 2)), // Simulate delay for 2 seconds
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting && _isLoading) {
+          // Show loading indicator once during the initial delay
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -107,116 +111,120 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 SizedBox(height: 16),
                 Text(
-                  'Filtering items...',
+                  '${_isLoadingStateFilter ? 'Filtering' : 'Loading'} ${_filterService.selectedCategory ?? 'All'} items...',
                   style: TextStyle(
                     color: Colors.grey[600],
                     fontSize: 16,
                   ),
-                ),
+                )
               ],
             ),
           );
         }
 
-        // Show filtered items or empty state after loading is done
-        return FutureBuilder<void>(
-          future: Future.delayed(Duration(seconds: 2)),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              // Still waiting, show loading
-              return Center(
-                child: CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
-                ),
-              );
+        return StreamBuilder<QuerySnapshot>(
+          stream: _filterService.getFilteredQuery().snapshots(),
+          builder: (context, itemSnapshot) {
+            if (itemSnapshot.hasError) {
+              return _filterService.buildEmptyState();
             }
 
-            // Check for query results after delay
-            return StreamBuilder<QuerySnapshot>(
-              stream: _filterService.getFilteredQuery().snapshots(),
-              builder: (context, itemSnapshot) {
-                if (itemSnapshot.hasError) {
-                  return _filterService.buildEmptyState();
-                }
-
-                if (!itemSnapshot.hasData || itemSnapshot.data!.docs.isEmpty) {
-                  return _filterService.buildEmptyState();
-                }
-
-                final items = itemSnapshot.data!.docs;
-                return GridView.builder(
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
-                    childAspectRatio: 0.75,
+            if (!itemSnapshot.hasData) {
+              // Only show the loading indicator if data is not ready and the state is still loading
+              if (_isLoading) {
+                return Center(
+                  child: CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
                   ),
-                  itemCount: items.length,
-                  itemBuilder: (context, index) {
-                    final item = items[index].data() as Map<String, dynamic>;
-                    final images = List<String>.from(item['images'] ?? []);
+                );
+              }
+            }
 
-                    return Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(10),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.grey.withOpacity(0.5),
-                            spreadRadius: 2,
-                            blurRadius: 5,
-                            offset: Offset(0, 3),
-                          ),
-                        ],
+            // Once data is loaded, stop the loading state
+            if (_isLoadingStateFilter == false) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _isLoadingStateFilter = true;
+              });
+            }
+
+            if (itemSnapshot.data!.docs.isEmpty) {
+              return _filterService.buildEmptyState();
+            }
+
+            final items = itemSnapshot.data!.docs;
+
+            // Build the grid of items
+            return GridView.builder(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 0.75,
+              ),
+              itemCount: items.length,
+              itemBuilder: (context, index) {
+                final item = items[index].data() as Map<String, dynamic>;
+                final images = List<String>.from(item['images'] ?? []);
+
+                return Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.5),
+                        spreadRadius: 2,
+                        blurRadius: 5,
+                        offset: Offset(0, 3),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.vertical(
-                                    top: Radius.circular(10)),
-                                image: DecorationImage(
-                                  image: NetworkImage(images.isNotEmpty
-                                      ? images[0]
-                                      : 'https://via.placeholder.com/150'),
-                                  fit: BoxFit.cover,
-                                ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius:
+                                BorderRadius.vertical(top: Radius.circular(10)),
+                            image: DecorationImage(
+                              image: NetworkImage(images.isNotEmpty
+                                  ? images[0]
+                                  : 'https://via.placeholder.com/150'),
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item['title'] ?? 'No Title',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              "\$${item['price']?.toString() ?? 'N/A'}",
+                              style: TextStyle(
+                                color: Colors.orange,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
                               ),
                             ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  item['title'] ?? 'No Title',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                SizedBox(height: 4),
-                                Text(
-                                  "\$${item['price']?.toString() ?? 'N/A'}",
-                                  style: TextStyle(
-                                    color: Colors.orange,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    );
-                  },
+                    ],
+                  ),
                 );
               },
             );
@@ -226,11 +234,18 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _updateCategory(String category) {
+  void _updateCategory(String category) async {
     setState(() {
-      _filterService.selectedCategory = category == 'All' ? null : category;
-      _filterService.reset();
+      _isLoading = true; // Set loading state to true when user taps a category
     });
+
+    // Update the category
+    _filterService.selectedCategory = category == 'All' ? null : category;
+    _filterService.resetAllFilters();
+
+    // Simulate a small delay or do any async filtering tasks
+
+    // Artificial delay of 1 second
   }
 
   Widget _buildCategoryBar() {
@@ -247,7 +262,14 @@ class _HomeScreenState extends State<HomeScreen> {
               (category == 'All' && _filterService.selectedCategory == null);
 
           return GestureDetector(
-            onTap: () => _updateCategory(category),
+            onTap: () {
+              setState(() {
+                _isLoadingStateFilter =
+                    false; // Set loading state to false when user taps
+              });
+
+              _updateCategory(category);
+            },
             child: Container(
               padding: EdgeInsets.symmetric(vertical: 8, horizontal: 20),
               decoration: BoxDecoration(
