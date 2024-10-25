@@ -50,6 +50,11 @@ dependencies:
   intl_phone_number_input: ^0.7.4
   csc_picker: ^0.2.7
   flutter_image_compress: ^2.3.0
+  geolocator: ^13.0.1
+  google_maps_flutter: ^2.9.0
+  geocoding: ^3.0.0
+  cached_network_image: ^3.4.1
+  shared_preferences: ^2.3.2
 dev_dependencies:
   flutter_test:
     sdk: flutter

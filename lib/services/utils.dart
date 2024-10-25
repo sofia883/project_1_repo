@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import 'package:csc_picker/csc_picker.dart';
+import 'package:geolocator/geolocator.dart';
+
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:geocoding/geocoding.dart';
 
 class ItemDetailsPage extends StatelessWidget {
   final Map<String, dynamic> item;
@@ -448,5 +452,143 @@ class FilterService {
         ],
       ),
     );
+  }
+}
+
+class LocationPickerWidget extends StatefulWidget {
+  final Function(Position position, Map<String, String> addressComponents)
+      onLocationSelected;
+
+  const LocationPickerWidget({
+    Key? key,
+    required this.onLocationSelected,
+  }) : super(key: key);
+
+  @override
+  _LocationPickerWidgetState createState() => _LocationPickerWidgetState();
+}
+
+class _LocationPickerWidgetState extends State<LocationPickerWidget> {
+  bool _isLoading = false;
+
+  Future<void> _getCurrentLocation() async {
+    setState(() => _isLoading = true);
+    try {
+      final position = await LocationServices.getCurrentLocation();
+      final addressComponents = await LocationServices.getAddressComponents(
+        LatLng(position.latitude, position.longitude),
+      );
+      widget.onLocationSelected(position, addressComponents);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: EdgeInsets.symmetric(vertical: 8),
+      child: ElevatedButton.icon(
+        onPressed: _isLoading ? null : _getCurrentLocation,
+        icon: Icon(Icons.my_location),
+        label: _isLoading
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  Text('Getting location...'),
+                ],
+              )
+            : Text('Use Current Location'),
+        style: ElevatedButton.styleFrom(
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        ),
+      ),
+    );
+  }
+}
+
+class LocationServices {
+  // Existing methods remain the same
+  static Future<Position> getCurrentLocation() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      throw 'Location services are disabled';
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        throw 'Location permissions are denied';
+      }
+    }
+
+    return await Geolocator.getCurrentPosition();
+  }
+
+  static Future<LatLng> getCoordinatesFromAddress(String address) async {
+    List<Location> locations = await locationFromAddress(address);
+    return LatLng(locations.first.latitude, locations.first.longitude);
+  }
+
+  static Future<String> getAddressFromCoordinates(LatLng position) async {
+    List<Placemark> placemarks = await placemarkFromCoordinates(
+      position.latitude,
+      position.longitude,
+    );
+    Placemark place = placemarks[0];
+    return '${place.street}, ${place.locality}, ${place.administrativeArea}, ${place.country}';
+  }
+
+  static double calculateDistance(LatLng point1, LatLng point2) {
+    return Geolocator.distanceBetween(
+      point1.latitude,
+      point1.longitude,
+      point2.latitude,
+      point2.longitude,
+    );
+  }
+
+  // Add this new method to get address components
+  static Future<Map<String, String>> getAddressComponents(
+      LatLng position) async {
+    try {
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+
+      Placemark place = placemarks[0];
+
+      return {
+        'street': place.street ?? '',
+        'city': place.locality ?? '',
+        'state': place.administrativeArea ?? '',
+        'country': place.country ?? '',
+        'postalCode': place.postalCode ?? '',
+      };
+    } catch (e) {
+      print('Error getting address components: $e');
+      return {
+        'street': '',
+        'city': '',
+        'state': '',
+        'country': '',
+        'postalCode': '',
+      };
+    }
   }
 }

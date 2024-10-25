@@ -7,7 +7,10 @@ import 'package:path/path.dart' as path;
 import 'package:intl_phone_number_input/intl_phone_number_input.dart'; // Import the package
 import 'package:csc_picker/csc_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
+import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:project_1/services/location_service.dart';
+import 'package:project_1/services/utils.dart';
 class AddItemScreen extends StatefulWidget {
   const AddItemScreen({Key? key}) : super(key: key);
 
@@ -199,6 +202,32 @@ class _AddItemScreenState extends State<AddItemScreen> {
     } finally {
       setState(() => _isLoading = false);
     }
+
+    try {
+      final Position position = await LocationServices.getCurrentLocation();
+      final LatLng itemLocation = LatLng(position.latitude, position.longitude);
+      String formattedAddress =
+          await LocationServices.getAddressFromCoordinates(itemLocation);
+
+      await FirebaseFirestore.instance.collection('items').add({
+        // ... your existing fields ...
+        'location': GeoPoint(position.latitude, position.longitude),
+        'formattedAddress': formattedAddress,
+        'address': {
+          'street': _addressController.text.trim(),
+          'city': selectedCity,
+          'state': selectedState,
+          'country': selectedCountry,
+          'postalCode': _postalCodeController.text.trim(),
+          'coordinates': {
+            'latitude': position.latitude,
+            'longitude': position.longitude,
+          }
+        },
+      });
+    } catch (e) {
+      // ... error handling ...
+    }
   }
 
   Widget _buildPhoneInput() {
@@ -254,15 +283,29 @@ class _AddItemScreenState extends State<AddItemScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Address Details',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
+        'Address Details',
+        style: TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
         ),
-        SizedBox(height: 16),
-        CSCPicker(
-          layout: Layout.vertical,
+      ),
+      SizedBox(height: 16),
+      LocationPickerWidget(
+        onLocationSelected: (position, address) async {
+          // Update the address fields based on the selected location
+          final addressComponents = await LocationServices.getAddressComponents(
+            LatLng(position.latitude, position.longitude),
+          );
+          
+          setState(() {
+            selectedCountry = addressComponents['country'];
+            selectedState = addressComponents['state'];
+            selectedCity = addressComponents['city'];
+          });
+        },
+      ),
+      SizedBox(height: 16),
+      CSCPicker(   layout: Layout.vertical,
           flagState: CountryFlag.ENABLE,
           dropdownDecoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),

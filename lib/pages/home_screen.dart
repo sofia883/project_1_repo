@@ -5,6 +5,7 @@ import 'package:project_1/services/search_delegate.dart';
 import 'package:project_1/services/utils.dart';
 import 'profile_page.dart';
 import 'add_ads_screen.dart';
+import 'detailed_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -12,7 +13,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  FilterOptions _filterOptions = FilterOptions();
   late FilterService _filterService;
   bool _isLoadingStateFilter = true;
   bool _isLoading = true;
@@ -299,7 +299,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-// Separated grid building logic into its own method
   Widget _buildGridContent(List<QueryDocumentSnapshot> items) {
     return GridView.builder(
       padding: EdgeInsets.symmetric(vertical: 16),
@@ -311,78 +310,92 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       itemCount: items.length,
       itemBuilder: (context, index) {
-        final item = items[index].data() as Map<String, dynamic>;
+        final doc = items[index];
+        final item = doc.data() as Map<String, dynamic>;
         final images = List<String>.from(item['images'] ?? []);
         final timestamp = item['createdAt'] as Timestamp?;
         final formattedDate = timestamp != null
             ? '${timestamp.toDate().day}/${timestamp.toDate().month}/${timestamp.toDate().year}'
             : 'No date';
 
-        return Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(10),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.grey.withOpacity(0.5),
-                spreadRadius: 2,
-                blurRadius: 5,
-                offset: Offset(0, 3),
+        return GestureDetector(
+          onTap: () {
+            // Fixed navigation to DetailedResultScreen
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => DetailedResultScreen(
+                  selectedDoc: doc,
+                  allDocs: items,
+                ),
               ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius:
-                        BorderRadius.vertical(top: Radius.circular(10)),
-                    image: DecorationImage(
-                      image: NetworkImage(images.isNotEmpty
-                          ? images[0]
-                          : 'https://via.placeholder.com/150'),
-                      fit: BoxFit.cover,
+            );
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.5),
+                  spreadRadius: 2,
+                  blurRadius: 5,
+                  offset: Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius:
+                          BorderRadius.vertical(top: Radius.circular(10)),
+                      image: DecorationImage(
+                        image: NetworkImage(images.isNotEmpty
+                            ? images[0]
+                            : 'https://via.placeholder.com/150'),
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item['name'] ?? 'No Title',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item['name'] ?? 'No Title',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      "\$${item['price']?.toString() ?? 'N/A'}",
-                      style: TextStyle(
-                        color: Colors.orange,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
+                      SizedBox(height: 4),
+                      Text(
+                        "\$${item['price']?.toString() ?? 'N/A'}",
+                        style: TextStyle(
+                          color: Colors.orange,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
                       ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      formattedDate,
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 12,
+                      SizedBox(height: 4),
+                      Text(
+                        formattedDate,
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 12,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
