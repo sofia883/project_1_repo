@@ -1,12 +1,13 @@
+// DetailedResultScreen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
-import 'package:project_1/services/utils.dart';
 
 class DetailedResultScreen extends StatefulWidget {
   final QueryDocumentSnapshot selectedDoc;
-  final List<QueryDocumentSnapshot>? allDocs; // Make it optional
+  final List<QueryDocumentSnapshot>? allDocs;
 
   DetailedResultScreen({
     Key? key,
@@ -19,23 +20,21 @@ class DetailedResultScreen extends StatefulWidget {
 }
 
 class _DetailedResultScreenState extends State<DetailedResultScreen> {
-  int currentViewCount = 0;
+  late int currentViewCount;
+
   late StreamSubscription<DocumentSnapshot> _viewCountSubscription;
   List<QueryDocumentSnapshot> relatedItems = [];
   bool isLoading = true;
+  bool _hasIncrementedView = false;
 
   @override
   void initState() {
     super.initState();
-    _initializeViewCount();
-    _setupViewCountListener();
-    _fetchRelatedItems(); // Fetch related items when screen opens
-  }
-
-  @override
-  void dispose() {
-    _viewCountSubscription.cancel();
-    super.dispose();
+    _fetchRelatedItems();
+    final item = widget.selectedDoc.data() as Map<String, dynamic>;
+    currentViewCount =
+        (item['viewCount'] ?? 0) + 1; // Increment immediately for UI
+    _incrementViewCount();
   }
 
   Future<void> _fetchRelatedItems() async {
@@ -46,12 +45,10 @@ class _DetailedResultScreenState extends State<DetailedResultScreen> {
     try {
       final item = widget.selectedDoc.data() as Map<String, dynamic>;
 
-      // Get category and location info
       final category = item['category'] ?? '';
       final city = item['address']?['city'] ?? '';
       final state = item['address']?['state'] ?? '';
 
-      // Query for related items
       final relatedItemsQuery = await FirebaseFirestore.instance
           .collection('items')
           .where('category', isEqualTo: category)
@@ -75,99 +72,17 @@ class _DetailedResultScreenState extends State<DetailedResultScreen> {
     }
   }
 
-  Future<void> _initializeViewCount() async {
+  Future<void> _incrementViewCount() async {
     try {
-      final itemDoc = await FirebaseFirestore.instance
+      await FirebaseFirestore.instance
           .collection('items')
           .doc(widget.selectedDoc.id)
-          .get();
-
-      if (mounted) {
-        setState(() {
-          currentViewCount = (itemDoc.data()?['viewCount'] ?? 0) as int;
-        });
-      }
-
-      await ViewCounterService.incrementViewCount(widget.selectedDoc.id);
+          .update({
+        'viewCount': FieldValue.increment(1),
+      });
     } catch (e) {
-      print('Error initializing view count: $e');
+      print('Error incrementing view count: $e');
     }
-  }
-
-  void _setupViewCountListener() {
-    _viewCountSubscription = FirebaseFirestore.instance
-        .collection('items')
-        .doc(widget.selectedDoc.id)
-        .snapshots()
-        .listen((docSnapshot) {
-      if (mounted && docSnapshot.exists) {
-        setState(() {
-          currentViewCount = (docSnapshot.data()?['viewCount'] ?? 0) as int;
-        });
-      }
-    });
-  }
-
-  void _navigateToItem(QueryDocumentSnapshot doc) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => DetailedResultScreen(
-          selectedDoc: doc,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRelatedItems() {
-    if (isLoading) {
-      return Center(child: CircularProgressIndicator());
-    }
-
-    if (relatedItems.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Text('No related items found'),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Text(
-            'Related Items',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8.0),
-          child: GridView.builder(
-            physics: NeverScrollableScrollPhysics(),
-            shrinkWrap: true,
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              childAspectRatio: 0.75,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-            ),
-            itemCount: relatedItems.length,
-            itemBuilder: (context, index) {
-              final doc = relatedItems[index];
-              return GestureDetector(
-                onTap: () => _navigateToItem(doc),
-                child: _buildDetailedItemCard(doc, false),
-              );
-            },
-          ),
-        ),
-        SizedBox(height: 16),
-      ],
-    );
   }
 
   Widget _buildDetailedItemCard(QueryDocumentSnapshot doc, bool isMainItem) {
@@ -278,12 +193,71 @@ class _DetailedResultScreenState extends State<DetailedResultScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Main item card
             _buildDetailedItemCard(widget.selectedDoc, true),
-
-            // Related items section
             _buildRelatedItems(),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRelatedItems() {
+    if (isLoading) {
+      return Center(child: CircularProgressIndicator());
+    }
+
+    if (relatedItems.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Text('No related items found'),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(
+            'Related Items',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8.0),
+          child: GridView.builder(
+            physics: NeverScrollableScrollPhysics(),
+            shrinkWrap: true,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 0.75,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            itemCount: relatedItems.length,
+            itemBuilder: (context, index) {
+              final doc = relatedItems[index];
+              return GestureDetector(
+                onTap: () => _navigateToItem(doc),
+                child: _buildDetailedItemCard(doc, false),
+              );
+            },
+          ),
+        ),
+        SizedBox(height: 16),
+      ],
+    );
+  }
+
+  void _navigateToItem(QueryDocumentSnapshot doc) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DetailedResultScreen(
+          selectedDoc: doc,
         ),
       ),
     );

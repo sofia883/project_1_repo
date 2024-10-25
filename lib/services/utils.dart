@@ -734,48 +734,42 @@ class PopularItemsWidget extends StatelessWidget {
   }
 }
 
+// Updated ViewCounterService
 class ViewCounterService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Increment view count for an item
-  static Future<void> incrementViewCount(String itemId) async {
+  static Future<void> logItemView(String itemId) async {
     try {
-      // Get the current user
       final user = FirebaseAuth.instance.currentUser;
+      final timestamp = FieldValue.serverTimestamp();
 
-      // Create a unique view record to prevent duplicate counts from same user
       if (user != null) {
-        final viewRef =
-            _firestore.collection('item_views').doc('${itemId}_${user.uid}');
+        // For authenticated users, create a unique view record
+        final viewId =
+            '${itemId}_${user.uid}_${DateTime.now().millisecondsSinceEpoch}';
+        await _firestore.collection('item_views').doc(viewId).set({
+          'userId': user.uid,
+          'itemId': itemId,
+          'timestamp': timestamp,
+        });
+      } else {
+        // For anonymous users, update daily count
+        final dateStr = DateTime.now().toIso8601String().split('T')[0];
+        final anonymousViewRef =
+            _firestore.collection('anonymous_views').doc('${itemId}_$dateStr');
 
-        final viewDoc = await viewRef.get();
-
-        // Only count view if user hasn't viewed in last 24 hours
-        if (!viewDoc.exists ||
-            viewDoc
-                .data()?['lastViewed']
-                .toDate()
-                .isBefore(DateTime.now().subtract(Duration(hours: 24)))) {
-          // Update the view record
-          await viewRef.set({
-            'userId': user.uid,
-            'itemId': itemId,
-            'lastViewed': FieldValue.serverTimestamp(),
-          });
-
-          // Increment the item's view count
-          await _firestore.collection('items').doc(itemId).update({
-            'viewCount': FieldValue.increment(1),
-            'lastViewed': FieldValue.serverTimestamp(),
-          });
-        }
+        await anonymousViewRef.set({
+          'itemId': itemId,
+          'count': FieldValue.increment(1),
+          'lastUpdated': timestamp,
+        }, SetOptions(merge: true));
       }
     } catch (e) {
-      print('Error incrementing view count: $e');
+      print('Error logging view: $e');
+      rethrow;
     }
   }
 
-  // Get popular items
   static Stream<QuerySnapshot> getPopularItems({int limit = 10}) {
     return _firestore
         .collection('items')
