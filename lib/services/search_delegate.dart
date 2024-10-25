@@ -5,12 +5,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:project_1/pages/detailed_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:project_1/services/utils.dart';
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:project_1/pages/detailed_screen.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class ProductSearchDelegate extends SearchDelegate {
   final FirebaseStorage storage = FirebaseStorage.instance;
@@ -319,6 +313,9 @@ class ProductSearchDelegate extends SearchDelegate {
 
     return StatefulBuilder(
       builder: (BuildContext context, StateSetter setState) {
+        // If history becomes empty during StatefulBuilder lifetime, return empty widget
+        if (history.isEmpty) return const SizedBox.shrink();
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -335,22 +332,23 @@ class ProductSearchDelegate extends SearchDelegate {
                       color: Colors.grey,
                     ),
                   ),
-                  if (history.isNotEmpty)
-                    TextButton(
-                      onPressed: () async {
-                        await _clearAllHistory();
-                        setState(() {
-                          history.clear();
-                        });
-                      },
-                      child: const Text(
-                        'Clear All',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.blue,
-                        ),
+                  TextButton(
+                    onPressed: () async {
+                      await _clearAllHistory();
+                      setState(() {
+                        history.clear();
+                      });
+                      query = '';
+                      showSuggestions(context);
+                    },
+                    child: const Text(
+                      'Clear All',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.blue,
                       ),
                     ),
+                  ),
                 ],
               ),
             ),
@@ -366,23 +364,24 @@ class ProductSearchDelegate extends SearchDelegate {
                   ),
                   direction: DismissDirection.endToStart,
                   onDismissed: (direction) async {
-                    // Remove item from local list first
                     setState(() {
                       history.remove(historyItem);
                     });
-                    // Then remove from storage
                     await _removeFromHistory(historyItem);
 
-                    // Show snackbar with undo option
+                    // Force rebuild if this was the last item
+                    if (history.isEmpty) {
+                      query = '';
+                      showSuggestions(context);
+                    }
+
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text('Removed "$historyItem"'),
                         action: SnackBarAction(
                           label: 'Undo',
                           onPressed: () async {
-                            // Add back to storage
                             await _addToHistory(historyItem);
-                            // Add back to local list
                             setState(() {
                               history.add(historyItem);
                             });
@@ -430,31 +429,18 @@ class ProductSearchDelegate extends SearchDelegate {
                           icon: const Icon(Icons.close,
                               size: 18, color: Colors.grey),
                           onPressed: () async {
-                            // Remove from local list first
                             setState(() {
                               history.remove(historyItem);
                             });
-                            // Then remove from storage
                             await _removeFromHistory(historyItem);
 
-                            // Show snackbar with undo option
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Removed "$historyItem"'),
-                                action: SnackBarAction(
-                                  label: 'Undo',
-                                  onPressed: () async {
-                                    // Add back to storage
-                                    await _addToHistory(historyItem);
-                                    // Add back to local list
-                                    setState(() {
-                                      history.add(historyItem);
-                                    });
-                                  },
-                                ),
-                                duration: const Duration(seconds: 2),
-                              ),
-                            );
+                            // Force rebuild if this was the last item
+                            if (history.isEmpty) {
+                              query = '';
+                              showSuggestions(context);
+                            }
+
+                            
                           },
                         ),
                       ],

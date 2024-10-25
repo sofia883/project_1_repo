@@ -3,10 +3,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import 'package:csc_picker/csc_picker.dart';
 import 'package:geolocator/geolocator.dart';
-
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geocoding/geocoding.dart';
+import 'package:project_1/pages/detailed_screen.dart';
 
 class ItemDetailsPage extends StatelessWidget {
   final Map<String, dynamic> item;
@@ -601,11 +602,19 @@ class PopularItemsWidget extends StatelessWidget {
       stream: ViewCounterService.getPopularItems(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Text('Error loading items');
+          return Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text('Error loading items'),
+          );
         }
 
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(child: CircularProgressIndicator());
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: CircularProgressIndicator(),
+            ),
+          );
         }
 
         final items = snapshot.data?.docs ?? [];
@@ -614,42 +623,111 @@ class PopularItemsWidget extends StatelessWidget {
           return SizedBox.shrink();
         }
 
-        return SizedBox(
-          height: 160,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: items.length,
-            itemBuilder: (context, index) {
-              final item = items[index].data() as Map<String, dynamic>;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Popular Items',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.grey,
+                ),
+              ),
+            ),
+            ListView.builder(
+              shrinkWrap: true,
+              physics: NeverScrollableScrollPhysics(),
+              itemCount: items.length,
+              itemBuilder: (context, index) {
+                final doc = items[index];
+                final item = doc.data() as Map<String, dynamic>;
 
-              return Card(
-                margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Container(
-                  width: 120,
-                  padding: EdgeInsets.all(8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (item['images']?.isNotEmpty ?? false)
+                // Get category and location for finding related items
+                final category = item['category'] ?? '';
+                final city = item['address']?['city'] ?? '';
+                final state = item['address']?['state'] ?? '';
+
+                return Card(
+                  margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: ListTile(
+                    contentPadding: EdgeInsets.all(12),
+                    leading: Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        color: Colors.grey[200],
+                      ),
+                      child: item['images']?.isNotEmpty ?? false
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: CachedNetworkImage(
+                                imageUrl: item['images'][0],
+                                fit: BoxFit.cover,
+                                fadeInDuration: Duration.zero,
+                                placeholderFadeInDuration: Duration.zero,
+                                placeholder: (context, url) => Container(
+                                  width: 60,
+                                  height: 60,
+                                  color: Colors.grey[200],
+                                ),
+                                errorWidget: (context, url, error) => Container(
+                                  width: 60,
+                                  height: 60,
+                                  color: Colors.grey[300],
+                                  child: Icon(Icons.image),
+                                ),
+                              ),
+                            )
+                          : Icon(Icons.image_not_supported, size: 30),
+                    ),
+                    title: Text(
+                      item['name'] ?? 'Unnamed Item',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Row(
+                      children: [
+                        Icon(Icons.location_on, size: 16, color: Colors.blue),
+                        SizedBox(width: 4),
                         Expanded(
-                          child: Image.network(
-                            item['images'][0],
-                            fit: BoxFit.cover,
+                          child: Text(
+                            '${item['address']['city']}, ${item['address']['state']}',
+                            style: TextStyle(color: Colors.grey[600]),
                           ),
                         ),
-                      SizedBox(height: 8),
-                      Text(
-                        item['name'] ?? 'Unnamed Item',
-                        style: TextStyle(fontSize: 14),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                      ],
+                    ),
+                    onTap: () async {
+                      // Get related items before navigation
+                      final relatedItemsQuery = await FirebaseFirestore.instance
+                          .collection('items')
+                          .where('category', isEqualTo: category)
+                          .where('address.city', isEqualTo: city)
+                          .where('address.state', isEqualTo: state)
+                          .where(FieldPath.documentId, isNotEqualTo: doc.id)
+                          .limit(10)
+                          .get();
+
+                      final relatedItems = relatedItemsQuery.docs;
+
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => DetailedResultScreen(
+                            selectedDoc: doc,
+                            allDocs: relatedItems,
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                ),
-              );
-            },
-          ),
+                );
+              },
+            ),
+          ],
         );
       },
     );
