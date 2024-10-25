@@ -1,9 +1,9 @@
-// DetailedResultScreen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:project_1/pages/home_screen.dart';
 import 'dart:async';
+import 'package:project_1/main.dart';
 
 class DetailedResultScreen extends StatefulWidget {
   final QueryDocumentSnapshot selectedDoc;
@@ -19,22 +19,86 @@ class DetailedResultScreen extends StatefulWidget {
   State<DetailedResultScreen> createState() => _DetailedResultScreenState();
 }
 
-class _DetailedResultScreenState extends State<DetailedResultScreen> {
+class _DetailedResultScreenState extends State<DetailedResultScreen>
+    with RouteAware {
   late int currentViewCount;
-
-  late StreamSubscription<DocumentSnapshot> _viewCountSubscription;
   List<QueryDocumentSnapshot> relatedItems = [];
   bool isLoading = true;
-  bool _hasIncrementedView = false;
+  StreamSubscription<DocumentSnapshot>? _docSubscription;
 
   @override
   void initState() {
     super.initState();
     _fetchRelatedItems();
-    final item = widget.selectedDoc.data() as Map<String, dynamic>;
-    currentViewCount =
-        (item['viewCount'] ?? 0) + 1; // Increment immediately for UI
-    _incrementViewCount();
+    _initializeAndIncrementViewCount();
+    _setupDocumentListener();
+  }
+
+  void _setupDocumentListener() {
+    _docSubscription = FirebaseFirestore.instance
+        .collection('items')
+        .doc(widget.selectedDoc.id)
+        .snapshots()
+        .listen((snapshot) {
+      if (mounted && snapshot.exists) {
+        setState(() {
+          currentViewCount = snapshot.data()?['viewCount'] ?? 0;
+        });
+      }
+    });
+  }
+
+  Future<void> _initializeAndIncrementViewCount() async {
+    try {
+      final item = widget.selectedDoc.data() as Map<String, dynamic>;
+      currentViewCount = item['viewCount'] ?? 0;
+
+      setState(() {
+        currentViewCount += 1;
+      });
+
+      await FirebaseFirestore.instance
+          .collection('items')
+          .doc(widget.selectedDoc.id)
+          .update({
+        'viewCount': FieldValue.increment(1),
+      });
+    } catch (e) {
+      print('Error updating view count: $e');
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      routeObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void didPopNext() {
+    super.didPopNext();
+    // When returning to this screen, refresh the view count from Firestore
+    FirebaseFirestore.instance
+        .collection('items')
+        .doc(widget.selectedDoc.id)
+        .get()
+        .then((doc) {
+      if (mounted && doc.exists) {
+        setState(() {
+          currentViewCount = doc.data()?['viewCount'] ?? 0;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _docSubscription?.cancel();
+    routeObserver.unsubscribe(this);
+    super.dispose();
   }
 
   Future<void> _fetchRelatedItems() async {
@@ -72,22 +136,12 @@ class _DetailedResultScreenState extends State<DetailedResultScreen> {
     }
   }
 
-  Future<void> _incrementViewCount() async {
-    try {
-      await FirebaseFirestore.instance
-          .collection('items')
-          .doc(widget.selectedDoc.id)
-          .update({
-        'viewCount': FieldValue.increment(1),
-      });
-    } catch (e) {
-      print('Error incrementing view count: $e');
-    }
-  }
-
   Widget _buildDetailedItemCard(QueryDocumentSnapshot doc, bool isMainItem) {
     final item = doc.data() as Map<String, dynamic>;
     final images = List<String>.from(item['images'] ?? []);
+
+    // Get the view count based on whether it's the main item or not
+    final viewCount = isMainItem ? currentViewCount : (item['viewCount'] ?? 0);
 
     return Card(
       margin: EdgeInsets.all(isMainItem ? 16 : 8),
@@ -150,9 +204,7 @@ class _DetailedResultScreenState extends State<DetailedResultScreen> {
                             size: 16, color: Colors.grey),
                         const SizedBox(width: 4),
                         Text(
-                          isMainItem
-                              ? '$currentViewCount'
-                              : '${item['viewCount'] ?? 0}',
+                          '$viewCount',
                           style: TextStyle(
                             fontSize: isMainItem ? 16 : 14,
                             color: Colors.grey[600],
@@ -267,22 +319,8 @@ class _DetailedResultScreenState extends State<DetailedResultScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ChatScreen(itemId: itemId),
+        builder: (context) => HomeScreen(),
       ),
-    );
-  }
-}
-
-class ChatScreen extends StatelessWidget {
-  final String itemId;
-
-  const ChatScreen({Key? key, required this.itemId}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Chat')),
-      body: const Center(child: Text('Chat interface coming soon')),
     );
   }
 }

@@ -734,12 +734,16 @@ class PopularItemsWidget extends StatelessWidget {
   }
 }
 
-// Updated ViewCounterService
 class ViewCounterService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   static Future<void> logItemView(String itemId) async {
     try {
+      // First increment the viewCount in the items collection
+      await _firestore.collection('items').doc(itemId).update({
+        'viewCount': FieldValue.increment(1),
+      });
+
       final user = FirebaseAuth.instance.currentUser;
       final timestamp = FieldValue.serverTimestamp();
 
