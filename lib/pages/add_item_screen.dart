@@ -11,6 +11,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:project_1/services/location_service.dart';
 import 'package:project_1/services/utils.dart';
+
 class AddItemScreen extends StatefulWidget {
   const AddItemScreen({Key? key}) : super(key: key);
 
@@ -163,6 +164,8 @@ class _AddItemScreenState extends State<AddItemScreen> {
       List<String> imageUrls = await _uploadImages();
 
       await FirebaseFirestore.instance.collection('items').add({
+        'viewCount': 0,
+        'lastViewed': null,
         'name': _nameController.text.trim(),
         'price': double.parse(_priceController.text.trim()),
         'description': _descriptionController.text.trim(),
@@ -283,29 +286,31 @@ class _AddItemScreenState extends State<AddItemScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-        'Address Details',
-        style: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
+          'Address Details',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
         ),
-      ),
-      SizedBox(height: 16),
-      LocationPickerWidget(
-        onLocationSelected: (position, address) async {
-          // Update the address fields based on the selected location
-          final addressComponents = await LocationServices.getAddressComponents(
-            LatLng(position.latitude, position.longitude),
-          );
-          
-          setState(() {
-            selectedCountry = addressComponents['country'];
-            selectedState = addressComponents['state'];
-            selectedCity = addressComponents['city'];
-          });
-        },
-      ),
-      SizedBox(height: 16),
-      CSCPicker(   layout: Layout.vertical,
+        SizedBox(height: 16),
+        LocationPickerWidget(
+          onLocationSelected: (position, address) async {
+            // Update the address fields based on the selected location
+            final addressComponents =
+                await LocationServices.getAddressComponents(
+              LatLng(position.latitude, position.longitude),
+            );
+
+            setState(() {
+              selectedCountry = addressComponents['country'];
+              selectedState = addressComponents['state'];
+              selectedCity = addressComponents['city'];
+            });
+          },
+        ),
+        SizedBox(height: 16),
+        CSCPicker(
+          layout: Layout.vertical,
           flagState: CountryFlag.ENABLE,
           dropdownDecoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),

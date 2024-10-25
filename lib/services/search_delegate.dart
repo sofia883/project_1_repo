@@ -4,6 +4,13 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:project_1/pages/detailed_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:project_1/services/utils.dart';
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:project_1/pages/detailed_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ProductSearchDelegate extends SearchDelegate {
   final FirebaseStorage storage = FirebaseStorage.instance;
@@ -18,127 +25,179 @@ class ProductSearchDelegate extends SearchDelegate {
 
   Future<List<String>> _getSearchHistory() async {
     final prefs = await SharedPreferences.getInstance();
-    final history = prefs.getStringList(searchHistoryKey) ?? [];
-    return history.reversed.toList();
+    return prefs.getStringList(searchHistoryKey)?.reversed.toList() ?? [];
   }
 
   Future<void> _addToHistory(String query) async {
     if (query.trim().isEmpty) return;
 
     final prefs = await SharedPreferences.getInstance();
-    final history = prefs.getStringList(searchHistoryKey) ?? [];
+    List<String> history = prefs.getStringList(searchHistoryKey) ?? [];
 
-    history.remove(query);
-    history.add(query);
+    // Remove duplicate if exists
+    history.remove(query.trim());
+    // Add new query at the end
+    history.add(query.trim());
 
+    // Keep only last 10 searches
     if (history.length > 10) {
-      history.removeAt(0);
+      history = history.sublist(history.length - 10);
     }
 
     await prefs.setStringList(searchHistoryKey, history);
   }
 
-  Future<void> _removeFromHistory(String query) async {
-    final prefs = await SharedPreferences.getInstance();
-    final history = prefs.getStringList(searchHistoryKey) ?? [];
-    history.remove(query);
-    await prefs.setStringList(searchHistoryKey, history);
-  }
+  Widget _buildSearchResultCard(
+    BuildContext context,
+    QueryDocumentSnapshot doc,
+    String query,
+    List<QueryDocumentSnapshot> allItems,
+  ) {
+    final item = doc.data() as Map<String, dynamic>;
 
-  Future<void> _clearAllHistory() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(searchHistoryKey);
-  }
-
-  Widget _buildSearchHistorySection(
-      BuildContext context, List<String> history) {
-    if (history.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Recent Searches',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              TextButton.icon(
-                icon: const Icon(Icons.delete_outline, size: 20),
-                label: const Text('Clear All'),
-                onPressed: () async {
-                  await _clearAllHistory();
-                  (context as Element).markNeedsBuild();
-                },
-              ),
-            ],
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: ListTile(
+        contentPadding: const EdgeInsets.all(12),
+        leading: Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            color: Colors.grey[200],
           ),
-        ),
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: history.length,
-          itemBuilder: (context, index) {
-            final historyItem = history[index];
-            return Dismissible(
-              key: Key(historyItem),
-              background: Container(
-                color: Colors.red,
-                alignment: Alignment.centerRight,
-                padding: const EdgeInsets.only(right: 16),
-                child: const Icon(Icons.delete, color: Colors.white),
-              ),
-              direction: DismissDirection.endToStart,
-              onDismissed: (direction) async {
-                await _removeFromHistory(historyItem);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Removed "$historyItem" from history'),
-                    action: SnackBarAction(
-                      label: 'Undo',
-                      onPressed: () async {
-                        await _addToHistory(historyItem);
-                        (context as Element).markNeedsBuild();
-                      },
+          child: item['images']?.isNotEmpty ?? false
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: CachedNetworkImage(
+                    imageUrl: item['images'][0],
+                    fit: BoxFit.cover,
+                    fadeInDuration: Duration.zero,
+                    placeholderFadeInDuration: Duration.zero,
+                    placeholder: (context, url) => Container(
+                      width: 60,
+                      height: 60,
+                      color: Colors.grey[200],
+                    ),
+                    errorWidget: (context, url, error) => Container(
+                      width: 60,
+                      height: 60,
+                      color: Colors.grey[300],
+                      child: const Icon(Icons.image),
                     ),
                   ),
-                );
-              },
-              child: ListTile(
-                leading: const Icon(Icons.history, color: Colors.grey),
-                title: Text(historyItem),
-                trailing: IconButton(
-                  icon: const Icon(Icons.close, size: 20),
-                  onPressed: () async {
-                    await _removeFromHistory(historyItem);
-                    (context as Element).markNeedsBuild();
-                  },
-                ),
-                onTap: () {
-                  query = historyItem;
-                  showResults(context);
-                },
-              ),
-            );
-          },
+                )
+              : const Icon(Icons.image_not_supported, size: 30),
         ),
-        const Divider(height: 1),
-      ],
+        title: _highlightText(item['name'], query),
+        subtitle: Row(
+          children: [
+            const Icon(Icons.location_on, size: 16, color: Colors.blue),
+            const SizedBox(width: 4),
+            Expanded(
+              child: _highlightText(
+                '${item['address']['city']}, ${item['address']['state']}',
+                query,
+              ),
+            ),
+          ],
+        ),
+        onTap: () async {
+          // Store search query when item is selected
+          if (query.isNotEmpty) {
+            await _addToHistory(query);
+          }
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DetailedResultScreen(
+                selectedDoc: doc,
+                allDocs: allItems,
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
-  Widget _buildPopularProducts() {
+  @override
+  Widget buildResults(BuildContext context) {
+    // Remove storing history here since we'll store it when item is selected
+    return _buildSearchResults(context, query);
+  }
+
+  Widget _buildSearchResults(BuildContext context, String query) {
+    return StreamBuilder(
+      stream: firestore.collection('items').orderBy('name').snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.wifi_off, size: 64, color: Colors.grey[400]),
+                const SizedBox(height: 16),
+                Text(
+                  'Network connection issue\nPlease check your internet connection',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 16,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {
+                    (context as Element).markNeedsBuild();
+                  },
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (!snapshot.hasData) {
+          return const SizedBox();
+        }
+
+        final items = snapshot.data!.docs;
+        final filteredItems = items.where((doc) {
+          final item = doc.data() as Map;
+          final name = item['name'].toString().toLowerCase();
+          final searchQuery = query.toLowerCase();
+
+          final address = item['address'] as Map?;
+          final city = address?['city']?.toString().toLowerCase() ?? '';
+          final state = address?['state']?.toString().toLowerCase() ?? '';
+
+          return name.contains(searchQuery) ||
+              city.contains(searchQuery) ||
+              state.contains(searchQuery);
+        }).toList();
+
+        if (filteredItems.isEmpty) {
+          return _buildNoResultsFound(query);
+        }
+
+        return ListView(
+          children: filteredItems
+              .map(
+                (doc) => _buildSearchResultCard(context, doc, query, items),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+
+  // Also add history storage to popular products selection
+  Widget _buildPopunlarProducts() {
     return StreamBuilder<QuerySnapshot>(
       stream: popularProductsStream,
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const SizedBox();
         }
 
         final items = snapshot.data!.docs;
@@ -149,8 +208,8 @@ class ProductSearchDelegate extends SearchDelegate {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
+            const Padding(
+              padding: EdgeInsets.all(16),
               child: Text(
                 'Popular Searches',
                 style: TextStyle(
@@ -170,7 +229,11 @@ class ProductSearchDelegate extends SearchDelegate {
                   final images = List<String>.from(item['images'] ?? []);
 
                   return GestureDetector(
-                    onTap: () {
+                    onTap: () async {
+                      // Store product name as search history when selected from popular
+                      if (item['name'] != null) {
+                        await _addToHistory(item['name']);
+                      }
                       Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -196,6 +259,10 @@ class ProductSearchDelegate extends SearchDelegate {
                                 width: 150,
                                 fit: BoxFit.cover,
                                 fadeInDuration: Duration.zero,
+                                placeholderFadeInDuration: Duration.zero,
+                                placeholder: (context, url) => Container(
+                                  color: Colors.grey[200],
+                                ),
                               ),
                             )
                           else
@@ -239,6 +306,174 @@ class ProductSearchDelegate extends SearchDelegate {
     );
   }
 
+  Future<void> _removeFromHistory(String query) async {
+    final prefs = await SharedPreferences.getInstance();
+    final history = prefs.getStringList(searchHistoryKey) ?? [];
+    history.remove(query);
+    await prefs.setStringList(searchHistoryKey, history);
+  }
+
+  Widget _buildSearchHistorySection(
+      BuildContext context, List<String> history) {
+    if (history.isEmpty) return const SizedBox.shrink();
+
+    return StatefulBuilder(
+      builder: (BuildContext context, StateSetter setState) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Recent Searches',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey,
+                    ),
+                  ),
+                  if (history.isNotEmpty)
+                    TextButton(
+                      onPressed: () async {
+                        await _clearAllHistory();
+                        setState(() {
+                          history.clear();
+                        });
+                      },
+                      child: const Text(
+                        'Clear All',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.blue,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Column(
+              children: history.map((historyItem) {
+                return Dismissible(
+                  key: Key(historyItem),
+                  background: Container(
+                    color: Colors.red.shade100,
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 16),
+                    child: const Icon(Icons.delete, color: Colors.red),
+                  ),
+                  direction: DismissDirection.endToStart,
+                  onDismissed: (direction) async {
+                    // Remove item from local list first
+                    setState(() {
+                      history.remove(historyItem);
+                    });
+                    // Then remove from storage
+                    await _removeFromHistory(historyItem);
+
+                    // Show snackbar with undo option
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Removed "$historyItem"'),
+                        action: SnackBarAction(
+                          label: 'Undo',
+                          onPressed: () async {
+                            // Add back to storage
+                            await _addToHistory(historyItem);
+                            // Add back to local list
+                            setState(() {
+                              history.add(historyItem);
+                            });
+                          },
+                        ),
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              query = historyItem;
+                              showResults(context);
+                            },
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.history,
+                                  size: 20,
+                                  color: Colors.grey,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    historyItem,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.black87,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close,
+                              size: 18, color: Colors.grey),
+                          onPressed: () async {
+                            // Remove from local list first
+                            setState(() {
+                              history.remove(historyItem);
+                            });
+                            // Then remove from storage
+                            await _removeFromHistory(historyItem);
+
+                            // Show snackbar with undo option
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Removed "$historyItem"'),
+                                action: SnackBarAction(
+                                  label: 'Undo',
+                                  onPressed: () async {
+                                    // Add back to storage
+                                    await _addToHistory(historyItem);
+                                    // Add back to local list
+                                    setState(() {
+                                      history.add(historyItem);
+                                    });
+                                  },
+                                ),
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _clearAllHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(searchHistoryKey);
+  }
+
   @override
   Widget buildSuggestions(BuildContext context) {
     if (query.isEmpty) {
@@ -247,7 +482,7 @@ class ProductSearchDelegate extends SearchDelegate {
           future: _getSearchHistory(),
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
-              return _buildPopularProducts();
+              return PopularItemsWidget();
             }
 
             return Column(
@@ -255,7 +490,7 @@ class ProductSearchDelegate extends SearchDelegate {
               children: [
                 if (snapshot.data!.isNotEmpty)
                   _buildSearchHistorySection(context, snapshot.data!),
-                _buildPopularProducts(),
+                PopularItemsWidget()
               ],
             );
           },
@@ -281,79 +516,6 @@ class ProductSearchDelegate extends SearchDelegate {
     return IconButton(
       icon: const Icon(Icons.arrow_back),
       onPressed: () => close(context, ''),
-    );
-  }
-
-  @override
-  Widget buildResults(BuildContext context) {
-    if (query.isNotEmpty) {
-      _addToHistory(query);
-    }
-    return _buildSearchResults(context, query);
-  }
-
-  Widget _buildSearchResults(BuildContext context, String query) {
-    return StreamBuilder(
-      stream: firestore.collection('items').orderBy('name').snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.wifi_off, size: 64, color: Colors.grey[400]),
-                const SizedBox(height: 16),
-                Text(
-                  'Network connection issue\nPlease check your internet connection',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 16,
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {
-                    // Force rebuild to retry
-                    (context as Element).markNeedsBuild();
-                  },
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
-          );
-        }
-
-        if (!snapshot.hasData) {
-          return const SizedBox(); // No loading indicator
-        }
-
-        final items = snapshot.data!.docs;
-        final filteredItems = items.where((doc) {
-          final item = doc.data() as Map;
-          final name = item['name'].toString().toLowerCase();
-          final searchQuery = query.toLowerCase();
-
-          final address = item['address'] as Map?;
-          final city = address?['city']?.toString().toLowerCase() ?? '';
-          final state = address?['state']?.toString().toLowerCase() ?? '';
-
-          return name.contains(searchQuery) ||
-              city.contains(searchQuery) ||
-              state.contains(searchQuery);
-        }).toList();
-
-        if (filteredItems.isEmpty) {
-          return _buildNoResultsFound(query);
-        }
-
-        return ListView(
-          children: [
-            ...filteredItems.map(
-              (doc) => _buildSearchResultCard(context, doc, query, items),
-            ),
-          ],
-        );
-      },
     );
   }
 
@@ -421,86 +583,5 @@ class ProductSearchDelegate extends SearchDelegate {
       print('Error getting image URL: $e');
       return null;
     }
-  }
-
-  Widget _buildSearchResultCard(
-    BuildContext context,
-    QueryDocumentSnapshot doc,
-    String query,
-    List<QueryDocumentSnapshot> allItems,
-  ) {
-    final item = doc.data() as Map<String, dynamic>;
-    final itemId = doc.id;
-
-    return FutureBuilder<String?>(
-      future: _getImageUrl(itemId),
-      builder: (context, snapshot) {
-        final imageUrl = snapshot.data;
-
-        return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: ListTile(
-            contentPadding: const EdgeInsets.all(12),
-            // Add this import at the top
-// Then replace the current leading part in the ListTile with this:
-            leading: Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                color: Colors.grey[200],
-              ),
-              child: item['images']?.isNotEmpty ?? false
-                  ? ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: CachedNetworkImage(
-                        imageUrl: item['images'][0],
-                        fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(
-                          width: 60,
-                          height: 60,
-                          color: Colors.grey[200],
-                          child: const Center(
-                            child: CircularProgressIndicator(),
-                          ),
-                        ),
-                        errorWidget: (context, url, error) => Container(
-                          width: 60,
-                          height: 60,
-                          color: Colors.grey[300],
-                          child: const Icon(Icons.image),
-                        ),
-                      ),
-                    )
-                  : const Icon(Icons.image_not_supported, size: 30),
-            ),
-            title: _highlightText(item['name'], query),
-            subtitle: Row(
-              children: [
-                Icon(Icons.location_on, size: 16, color: Colors.blue),
-                SizedBox(width: 4),
-                Expanded(
-                  child: _highlightText(
-                    '${item['address']['city']}, ${item['address']['state']}',
-                    query,
-                  ),
-                ),
-              ],
-            ),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => DetailedResultScreen(
-                    selectedDoc: doc,
-                    allDocs: allItems,
-                  ),
-                ),
-              );
-            },
-          ),
-        );
-      },
-    );
   }
 }

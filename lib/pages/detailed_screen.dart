@@ -1,14 +1,12 @@
+// DetailedResultScreen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 
-class DetailedResultScreen extends StatelessWidget {
+class DetailedResultScreen extends StatefulWidget {
   final QueryDocumentSnapshot selectedDoc;
   final List<QueryDocumentSnapshot> allDocs;
-  final FirebaseStorage storage = FirebaseStorage.instance;
 
   DetailedResultScreen({
     Key? key,
@@ -16,152 +14,102 @@ class DetailedResultScreen extends StatelessWidget {
     required this.allDocs,
   }) : super(key: key);
 
-  Future<String?> _getImageUrl(String itemId) async {
+  @override
+  State<DetailedResultScreen> createState() => _DetailedResultScreenState();
+}
+
+class _DetailedResultScreenState extends State<DetailedResultScreen> {
+  late int currentViewCount;
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize with current view count
+    final item = widget.selectedDoc.data() as Map<String, dynamic>;
+    currentViewCount =
+        (item['viewCount'] ?? 0) + 1; // Increment immediately for UI
+    _incrementViewCount();
+  }
+
+  Future<void> _incrementViewCount() async {
     try {
-      final ref = storage.ref().child('items/$itemId.jpg');
-      return await ref.getDownloadURL();
+      await FirebaseFirestore.instance
+          .collection('items')
+          .doc(widget.selectedDoc.id)
+          .update({
+        'viewCount': FieldValue.increment(1),
+      });
     } catch (e) {
-      print('Error getting image URL: $e');
-      return null;
+      print('Error incrementing view count: $e');
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final selectedItem = selectedDoc.data() as Map<String, dynamic>;
+  Widget _buildDetailedItemCard(QueryDocumentSnapshot doc, bool isMainItem) {
+    final item = doc.data() as Map<String, dynamic>;
+    final images = List<String>.from(item['images'] ?? []);
 
-    // Get related items by category
-    final categoryRelatedDocs = allDocs
-        .where((doc) {
-          final item = doc.data() as Map<String, dynamic>;
-          return item['category'] == selectedItem['category'] &&
-              doc.id != selectedDoc.id;
-        })
-        .take(5)
-        .toList();
-
-    // Get related items by city
-    final cityRelatedDocs = allDocs
-        .where((doc) {
-          final item = doc.data() as Map<String, dynamic>;
-          return item['address']['city'] == selectedItem['address']['city'] &&
-              doc.id != selectedDoc.id &&
-              !categoryRelatedDocs.contains(doc);
-        })
-        .take(5)
-        .toList();
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(selectedItem['name']),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.chat),
-            onPressed: () => _openChat(context, selectedDoc.id),
-          ),
-        ],
-      ),
-      body: ListView(
+    return Card(
+      margin: EdgeInsets.all(isMainItem ? 16 : 8),
+      elevation: isMainItem ? 4 : 2,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Selected Item
-          _buildDetailedItemCard(selectedDoc, true),
-
-          // Category Related Items
-          if (categoryRelatedDocs.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-              child: Text(
-                'Similar Items',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-            ...categoryRelatedDocs
-                .map((doc) => _buildDetailedItemCard(doc, false)),
-          ],
-
-          // Location Related Items
-          if (cityRelatedDocs.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-              child: Text(
-                'More from ${selectedItem['address']['city']}',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-            ...cityRelatedDocs.map((doc) => _buildDetailedItemCard(doc, false)),
-          ],
-
-          // No More Items Message
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Center(
-              child: Text(
-                'No more items found 😊',
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
+          if (images.isNotEmpty)
+            SizedBox(
+              height: isMainItem ? 300 : 150,
+              width: double.infinity,
+              child: CachedNetworkImage(
+                imageUrl: images[0],
+                fit: BoxFit.cover,
+                placeholder: (context, url) => Center(
+                  child: CircularProgressIndicator(),
                 ),
+                errorWidget: (context, url, error) => Icon(Icons.error),
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-Widget _buildDetailedItemCard(QueryDocumentSnapshot doc, bool isMainItem) {
-  final item = doc.data() as Map<String, dynamic>;
-  final images = List<String>.from(item['images'] ?? []);
-
-  return Card(
-    margin: EdgeInsets.all(isMainItem ? 16 : 8),
-    elevation: isMainItem ? 4 : 2,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (images.isNotEmpty)
-          CachedNetworkImage(
-            imageUrl: images[0],
-            height: isMainItem ? 300 : 200,
-            width: double.infinity,
-            fit: BoxFit.cover,
-            fadeInDuration: Duration.zero, // Remove fade animation
-            placeholderFadeInDuration: Duration.zero,
-            errorWidget: (context, url, error) => Container(
-              height: isMainItem ? 300 : 200,
-              color: Colors.grey[300],
-              child: const Icon(Icons.image, size: 64),
-            ),
-          )
-        else
-          Container(
-            height: isMainItem ? 300 : 200,
-            color: Colors.grey[300],
-            child: const Icon(Icons.image, size: 64),
-          ),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item['name'],
+                  style: TextStyle(
+                    fontSize: isMainItem ? 24 : 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      item['name'],
-                      style: TextStyle(
-                        fontSize: isMainItem ? 24 : 18,
-                        fontWeight: FontWeight.bold,
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Icon(Icons.location_on, size: 16, color: Colors.blue),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              '${item['address']['city']}, ${item['address']['state']}',
+                              style: TextStyle(
+                                fontSize: isMainItem ? 16 : 14,
+                                color: Colors.grey[600],
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 8),
                     Row(
                       children: [
-                        Icon(Icons.location_on, size: 16, color: Colors.blue),
+                        Icon(Icons.remove_red_eye,
+                            size: 16, color: Colors.grey),
                         const SizedBox(width: 4),
                         Text(
-                          '${item['address']['city']}, ${item['address']['state']}',
+                          isMainItem
+                              ? '$currentViewCount'
+                              : '${item['viewCount'] ?? 0}',
                           style: TextStyle(
                             fontSize: isMainItem ? 16 : 14,
                             color: Colors.grey[600],
@@ -169,20 +117,83 @@ Widget _buildDetailedItemCard(QueryDocumentSnapshot doc, bool isMainItem) {
                         ),
                       ],
                     ),
-                    if (isMainItem) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        item['description'] ?? 'No description available',
-                        style: const TextStyle(fontSize: 16),
-                      ),
-                    ],
                   ],
+                ),
+                if (isMainItem) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    item['description'] ?? 'No description available',
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Details'),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.message),
+            onPressed: () => _openChat(context, widget.selectedDoc.id),
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Main item card
+            _buildDetailedItemCard(widget.selectedDoc, true),
+
+            // Related items section
+            if (widget.allDocs.length > 1) ...[
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(
+                  'Related Items',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+
+              // Grid of related items
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                child: GridView.builder(
+                  physics: NeverScrollableScrollPhysics(),
+                  shrinkWrap: true,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    childAspectRatio: 0.75,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                  ),
+                  itemCount: widget.allDocs.length - 1,
+                  itemBuilder: (context, index) {
+                    final docs = widget.allDocs
+                        .where((doc) => doc.id != widget.selectedDoc.id)
+                        .toList();
+                    return _buildDetailedItemCard(docs[index], false);
+                  },
                 ),
               ),
             ],
-          ),
-        );
-      }
+          ],
+        ),
+      ),
+    );
+  }
+
   void _openChat(BuildContext context, String itemId) {
     Navigator.push(
       context,

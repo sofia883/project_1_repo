@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:csc_picker/csc_picker.dart';
 import 'package:geolocator/geolocator.dart';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geocoding/geocoding.dart';
 
@@ -590,5 +591,118 @@ class LocationServices {
         'postalCode': '',
       };
     }
+  }
+}
+
+class PopularItemsWidget extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: ViewCounterService.getPopularItems(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Text('Error loading items');
+        }
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
+
+        final items = snapshot.data?.docs ?? [];
+
+        if (items.isEmpty) {
+          return SizedBox.shrink();
+        }
+
+        return SizedBox(
+          height: 160,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              final item = items[index].data() as Map<String, dynamic>;
+
+              return Card(
+                margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Container(
+                  width: 120,
+                  padding: EdgeInsets.all(8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (item['images']?.isNotEmpty ?? false)
+                        Expanded(
+                          child: Image.network(
+                            item['images'][0],
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      SizedBox(height: 8),
+                      Text(
+                        item['name'] ?? 'Unnamed Item',
+                        style: TextStyle(fontSize: 14),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+class ViewCounterService {
+  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // Increment view count for an item
+  static Future<void> incrementViewCount(String itemId) async {
+    try {
+      // Get the current user
+      final user = FirebaseAuth.instance.currentUser;
+
+      // Create a unique view record to prevent duplicate counts from same user
+      if (user != null) {
+        final viewRef =
+            _firestore.collection('item_views').doc('${itemId}_${user.uid}');
+
+        final viewDoc = await viewRef.get();
+
+        // Only count view if user hasn't viewed in last 24 hours
+        if (!viewDoc.exists ||
+            viewDoc
+                .data()?['lastViewed']
+                .toDate()
+                .isBefore(DateTime.now().subtract(Duration(hours: 24)))) {
+          // Update the view record
+          await viewRef.set({
+            'userId': user.uid,
+            'itemId': itemId,
+            'lastViewed': FieldValue.serverTimestamp(),
+          });
+
+          // Increment the item's view count
+          await _firestore.collection('items').doc(itemId).update({
+            'viewCount': FieldValue.increment(1),
+            'lastViewed': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+    } catch (e) {
+      print('Error incrementing view count: $e');
+    }
+  }
+
+  // Get popular items
+  static Stream<QuerySnapshot> getPopularItems({int limit = 10}) {
+    return _firestore
+        .collection('items')
+        .orderBy('viewCount', descending: true)
+        .limit(limit)
+        .snapshots();
   }
 }
