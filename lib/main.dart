@@ -7,23 +7,20 @@ import 'package:project_1/pages/login_page.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:project_1/services/auth.dart';
 import 'package:project_1/pages/user_listing_screen.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+
 final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
 
 // Main function remains similar but with auth state stream
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  try {
-    await Firebase.initializeApp();
-    await FirebaseAppCheck.instance.activate(
-      androidProvider: AndroidProvider.debug,
-      // Add error handling
-    );
-  } catch (e) {
-    print('Firebase Initialization Error: $e');
-  }
-
+  await Firebase.initializeApp();
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   runApp(MyApp());
+}
+
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
 }
 
 class MyApp extends StatelessWidget {

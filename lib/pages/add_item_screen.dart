@@ -40,27 +40,6 @@ class _AddItemScreenState extends State<AddItemScreen> {
   String? selectedCity;
 
   PhoneNumber? _phoneNumber; // Declare PhoneNumber variable
-  final List<String> _categories = [
-    'All',
-    'Cars',
-    'Electronics',
-    'Fashion',
-    'Home',
-    'Furniture',
-    'Books',
-    'Toys',
-    'Sports',
-    'Beauty',
-    'Health',
-    'Automotive',
-    'Jewelry',
-    'Groceries',
-    'Music',
-    'Pet Supplies',
-    'Garden',
-    'Office Supplies',
-    'Baby Products',
-  ];
 
   final ImagePicker _picker = ImagePicker();
   Future<void> _pickImages() async {
@@ -511,7 +490,7 @@ class _AddItemScreenState extends State<AddItemScreen> {
                   labelText: 'Category',
                   border: OutlineInputBorder(),
                 ),
-                items: _categories.map((category) {
+                items: Utils.categories.map((category) {
                   return DropdownMenuItem(
                     value: category,
                     child: Text(category),

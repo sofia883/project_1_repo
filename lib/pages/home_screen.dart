@@ -6,6 +6,8 @@ import 'package:project_1/services/utils.dart';
 import 'profile_page.dart';
 import 'add_ads_screen.dart';
 import 'detailed_screen.dart';
+import 'all_conversations.dart';
+import 'package:project_1/services/image_slider.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -16,36 +18,6 @@ class _HomeScreenState extends State<HomeScreen> {
   late FilterService _filterService;
   bool _isLoadingStateFilter = true;
   bool _isLoading = true;
-
-  // Categories to show in the main row
-  final List<String> _mainCategories = [
-    'All',
-    'Electronics',
-    'Fashion',
-    'Home',
-  ];
-
-  // All categories for the dropdown
-  final List<String> _allCategories = [
-    'All',
-    'Electronics',
-    'Fashion',
-    'Home',
-    'Furniture',
-    'Books',
-    'Toys',
-    'Sports',
-    'Beauty',
-    'Health',
-    'Automotive',
-    'Jewelry',
-    'Groceries',
-    'Music',
-    'Pet Supplies',
-    'Garden',
-    'Office Supplies',
-    'Baby Products'
-  ];
 
   @override
   void initState() {
@@ -93,6 +65,13 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => AddAdvertisementScreen()),
+              ),
+            ),
+            IconButton(
+              icon: Icon(Icons.chat, color: Colors.black),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => ConversationsListScreen()),
               ),
             ),
             IconButton(
@@ -154,16 +133,10 @@ class _HomeScreenState extends State<HomeScreen> {
       child: PageView.builder(
         itemCount: _ads.length,
         itemBuilder: (context, index) {
-          final ad = _ads[index];
           return Card(
             margin: EdgeInsets.all(8),
             child: Stack(
               children: [
-                Image.network(
-                  ad['imageUrl'] ?? 'https://via.placeholder.com/400x200',
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                ),
                 Positioned(
                   bottom: 0,
                   left: 0,
@@ -171,28 +144,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Container(
                     padding: EdgeInsets.all(8),
                     color: Colors.black54,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          ad['title'] ?? 'Advertisement',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          ad['description'] ?? '',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+                    child: ImageSlider(
+                      items: _ads, // Your ads list from Firebase
+                      height: 200,
+                      autoSlide: true,
+                      isAd: true,
+                      autoSlideDuration: Duration(seconds: 3),
                     ),
                   ),
                 ),
@@ -418,7 +375,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildCategoryBar() {
     // Show first 3 categories only
-    final displayCategories = _allCategories.take(3).toList();
+    final displayCategories = Utils.categories.take(3).toList();
 
     return Container(
       padding: EdgeInsets.symmetric(vertical: 10, horizontal: 16),
@@ -460,7 +417,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               onSelected: _updateCategory,
               itemBuilder: (BuildContext context) {
-                return _allCategories
+                return Utils.categories
                     .skip(
                         3) // Skip the first 3 categories that are already shown
                     .map((String category) {
