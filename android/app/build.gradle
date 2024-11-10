@@ -51,6 +51,7 @@ flutter {
 dependencies {
   // Import the Firebase BoM
   implementation platform('com.google.firebase:firebase-bom:33.4.0')
+  implementation 'com.google.firebase:firebase-messaging:23.1.0' // Check for the latest version
 
 
   // TODO: Add the dependencies for Firebase products you want to use

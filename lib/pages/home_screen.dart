@@ -8,6 +8,8 @@ import 'add_ads_screen.dart';
 import 'detailed_screen.dart';
 import 'all_conversations.dart';
 import 'package:project_1/services/image_slider.dart';
+import 'package:project_1/services/featured_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -15,6 +17,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
   late FilterService _filterService;
   bool _isLoadingStateFilter = true;
   bool _isLoading = true;
@@ -46,6 +50,27 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _deleteItem(String itemId) async {
+    // Check if user is authenticated
+    if (FirebaseAuth.instance.currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('You must be logged in to delete items')),
+      );
+      return;
+    }
+
+    try {
+      await _firestore.collection('items').doc(itemId).delete();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Item deleted successfully')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting item: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -65,13 +90,6 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => AddAdvertisementScreen()),
-              ),
-            ),
-            IconButton(
-              icon: Icon(Icons.chat, color: Colors.black),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => ConversationsListScreen()),
               ),
             ),
             IconButton(
@@ -113,6 +131,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     children: [
                       _buildCategoryBar(),
+                      _buildFeaturedItemsSection(), //
                       if (_ads.isNotEmpty) _buildAdsCarousel(),
                     ],
                   ),
@@ -256,6 +275,95 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+// Add this to HomeScreen for featured items display
+  Widget _buildFeaturedItemsSection() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FeaturedService.getFeaturedItems(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return SizedBox.shrink();
+
+        final featuredItems = snapshot.data!.docs;
+        if (featuredItems.isEmpty) return SizedBox.shrink();
+
+        return Container(
+          height: 200,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Featured Items',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: featuredItems.length,
+                  itemBuilder: (context, index) {
+                    final featuredItem =
+                        featuredItems[index].data() as Map<String, dynamic>;
+                    return FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('items')
+                          .doc(featuredItem['itemId'])
+                          .get(),
+                      builder: (context, itemSnapshot) {
+                        if (!itemSnapshot.hasData) return SizedBox.shrink();
+
+                        final item =
+                            itemSnapshot.data!.data() as Map<String, dynamic>;
+                        return Container(
+                          width: 200,
+                          margin: EdgeInsets.symmetric(horizontal: 8),
+                          child: Card(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  height: 120,
+                                  decoration: BoxDecoration(
+                                    image: DecorationImage(
+                                      image: NetworkImage(item['images'][0]),
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
+                                ),
+                                Padding(
+                                  padding: EdgeInsets.all(8),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        item['name'],
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                      Text('\$${item['price']}'),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildGridContent(List<QueryDocumentSnapshot> items) {
     return GridView.builder(
       padding: EdgeInsets.symmetric(vertical: 16),
@@ -332,6 +440,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       SizedBox(height: 4),
+                      // In the IconButton widget, change this line:
+                      IconButton(
+                          onPressed: () =>
+                              _deleteItem(doc.id), // Pass the document ID here
+                          icon: Icon(Icons.delete)),
                       Text(
                         "\$${item['price']?.toString() ?? 'N/A'}",
                         style: TextStyle(

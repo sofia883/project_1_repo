@@ -9,6 +9,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:project_1/pages/detailed_screen.dart';
 
+import 'package:geolocator/geolocator.dart';
+
 class Utils {
   static final List<String> categories = [
     'All',
@@ -330,88 +332,102 @@ class FilterService {
 }
 
 class LocationPickerWidget extends StatefulWidget {
-  final Function(Position position, Map<String, String> addressComponents)
-      onLocationSelected;
+  final Function(Position, String) onLocationSelected;
 
-  const LocationPickerWidget({
-    Key? key,
-    required this.onLocationSelected,
-  }) : super(key: key);
+  LocationPickerWidget({required this.onLocationSelected});
 
   @override
   _LocationPickerWidgetState createState() => _LocationPickerWidgetState();
 }
 
 class _LocationPickerWidgetState extends State<LocationPickerWidget> {
-  bool _isLoading = false;
+  bool _isLoadingLocation = false;
+  String? _currentAddress;
+  TextEditingController _addressController = TextEditingController();
 
   Future<void> _getCurrentLocation() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoadingLocation = true;
+    });
+
     try {
-      final position = await LocationServices.getCurrentLocation();
-      final addressComponents = await LocationServices.getAddressComponents(
-        LatLng(position.latitude, position.longitude),
+      Position position = await Geolocator.getCurrentPosition();
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
       );
-      widget.onLocationSelected(position, addressComponents);
+
+      if (placemarks.isNotEmpty) {
+        Placemark place = placemarks[0];
+        _currentAddress =
+            '${place.street}, ${place.locality}, ${place.administrativeArea}';
+        _addressController.text = _currentAddress!;
+        widget.onLocationSelected(position, _currentAddress!);
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error getting location: $e')),
       );
     } finally {
-      setState(() => _isLoading = false);
+      setState(() {
+        _isLoadingLocation = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: EdgeInsets.symmetric(vertical: 8),
-      child: ElevatedButton.icon(
-        onPressed: _isLoading ? null : _getCurrentLocation,
-        icon: Icon(Icons.my_location),
-        label: _isLoading
-            ? Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
+    return Column(
+      children: [
+        TextFormField(
+          controller: _addressController,
+          decoration: InputDecoration(
+            labelText: 'Address',
+            border: OutlineInputBorder(),
+            suffixIcon: _isLoadingLocation
+                ? CircularProgressIndicator()
+                : IconButton(
+                    icon: Icon(Icons.my_location),
+                    onPressed: _getCurrentLocation,
                   ),
-                  SizedBox(width: 8),
-                  Text('Getting location...'),
-                ],
-              )
-            : Text('Use Current Location'),
-        style: ElevatedButton.styleFrom(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          ),
         ),
-      ),
+        if (_currentAddress != null)
+          Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text(
+              'Current Location: $_currentAddress',
+              style: TextStyle(color: Colors.green),
+            ),
+          ),
+      ],
     );
   }
 }
 
 class LocationServices {
-  // Existing methods remain the same
   static Future<Position> getCurrentLocation() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      throw 'Location services are disabled';
+      throw Exception('Location services are disabled.');
     }
 
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        throw 'Location permissions are denied';
+        throw Exception('Location permissions are denied');
       }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      throw Exception('Location permissions are permanently denied');
     }
 
     return await Geolocator.getCurrentPosition();
   }
+
+  // ... rest of your LocationServices code
 
   static Future<LatLng> getCoordinatesFromAddress(String address) async {
     List<Location> locations = await locationFromAddress(address);
@@ -652,5 +668,51 @@ class ViewCounterService {
         .orderBy('viewCount', descending: true)
         .limit(limit)
         .snapshots();
+  }
+}
+
+class PermissionService {
+  static Future<bool> handleLocationPermission(BuildContext context) async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    // Test if location services are enabled
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Location services are disabled. Please enable the services'),
+        ),
+      );
+      return false;
+    }
+
+    // Check location permission
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Location permissions are denied'),
+          ),
+        );
+        return false;
+      }
+    }
+
+    // Check if permission is permanently denied
+    if (permission == LocationPermission.deniedForever) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Location permissions are permanently denied, we cannot request permissions.'),
+        ),
+      );
+      return false;
+    }
+
+    return true;
   }
 }

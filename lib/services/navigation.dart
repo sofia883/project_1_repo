@@ -16,7 +16,6 @@ class _MainNavigationState extends State<MainNavigation> {
 
   final List<Widget> _screens = [
     HomeScreen(),
-    
     AddItemScreen(),
     ProfileScreen(),
   ];

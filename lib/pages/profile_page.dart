@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'user_listing_screen.dart';
 
+
 class ProfileScreen extends StatefulWidget {
   @override
   _ProfileScreenState createState() => _ProfileScreenState();
@@ -17,6 +18,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isLoading = false;
   String _error = '';
   final ImagePicker _picker = ImagePicker();
+  bool _showUpgradePrompt = false;
+  int _remainingFreeListings = 3;
+  DateTime? _planExpiryDate;
 
   // Controllers for editing profile
   final _nameController = TextEditingController();
@@ -29,22 +33,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadUserData();
-    // Initialize with Firebase Auth data
+    _checkSubscriptionStatus();
     _emailController.text = user?.email ?? '';
     _phoneController.text = user?.phoneNumber ?? '';
   }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _emailController.dispose();
-    _phoneController.dispose();
-    _locationController.dispose();
-    _bioController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadUserData() async {
+Future<void> _loadUserData() async {
     if (user == null) return;
 
     setState(() {
@@ -80,27 +73,234 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() => _isLoading = false);
     }
   }
+  Future<void> _checkSubscriptionStatus() async {
+    if (user == null) return;
 
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user!.uid)
+        .get();
+
+    if (userDoc.exists) {
+      final userData = userDoc.data() as Map<String, dynamic>;
+      final subscriptionStatus = userData['subscriptionStatus'] ?? 'free';
+      final lastPostDate = userData['lastPostDate']?.toDate();
+      
+      if (subscriptionStatus == 'free') {
+        final listings = await FirebaseFirestore.instance
+            .collection('items')
+            .where('userId', isEqualTo: user!.uid)
+            .where('postDate', isGreaterThan: DateTime.now().subtract(Duration(days: 28)))
+            .get();
+
+        setState(() {
+          _remainingFreeListings = 3 - listings.docs.length;
+          if (_remainingFreeListings <= 0) {
+            _showUpgradePrompt = true;
+          }
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Profile'),
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.blue.shade700, Colors.blue.shade900],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+        ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.edit),
+            onPressed: _showEditProfileDialog,
+          ),
+          IconButton(
+            icon: Icon(Icons.settings),
+            onPressed: () => Navigator.pushNamed(context, '/settings'),
+          ),
+        ],
+      ),
+      body: _isLoading
+          ? Center(child: CircularProgressIndicator())
+          : Stack(
+              children: [
+                RefreshIndicator(
+                  onRefresh: _loadUserData,
+                  child: SingleChildScrollView(
+                    physics: AlwaysScrollableScrollPhysics(),
+                    child: Column(
+                      children: [
+                        _buildProfileHeader(),
+                        _buildSubscriptionStatus(),
+                        _buildUserDetails(),
+                        _buildSettingsSection(),
+                        _buildMyListingsSection(),
+                      ],
+                    ),
+                  ),
+                ),
+                if (_showUpgradePrompt) _buildUpgradeOverlay(),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildSubscriptionStatus() {
+    return Container(
+      margin: EdgeInsets.all(16),
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.blue.shade50, Colors.blue.shade100],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Text(
+            'Current Plan: ${_remainingFreeListings > 0 ? "Free Plan" : "Free Plan (Limit Reached)"}',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.blue.shade900,
+            ),
+          ),
+          SizedBox(height: 8),
+          Text(
+            'Remaining Free Listings: $_remainingFreeListings',
+            style: TextStyle(
+              fontSize: 16,
+              color: Colors.blue.shade700,
+            ),
+          ),
+          SizedBox(height: 16),
+          if (_remainingFreeListings <= 1)
+            ElevatedButton.icon(
+              icon: Icon(Icons.star),
+              label: Text('Upgrade to Premium'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue.shade700,
+                foregroundColor: Colors.white,
+                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              onPressed: _showUpgradePlan,
+            ),
+        ],
       ),
     );
   }
 
-  void _showSuccessSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
+  Widget _buildUpgradeOverlay() {
+    return Container(
+      color: Colors.black.withOpacity(0.8),
+      child: Center(
+        child: Card(
+          margin: EdgeInsets.all(32),
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.workspace_premium,
+                  size: 64,
+                  color: Colors.blue.shade700,
+                ),
+                SizedBox(height: 16),
+                Text(
+                  'Upgrade to Premium',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue.shade900,
+                  ),
+                ),
+                SizedBox(height: 16),
+                Text(
+                  'You\'ve reached your free plan limit.\nUpgrade to continue posting!',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 16),
+                ),
+                SizedBox(height: 24),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade700,
+                    padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                  ),
+                  child: Text('Upgrade Now'),
+                  onPressed: _showUpgradePlan,
+                ),
+                TextButton(
+                  child: Text('Maybe Later'),
+                  onPressed: () {
+                    setState(() => _showUpgradePrompt = false);
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 
+  void _showUpgradePlan() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Choose Your Plan'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildPlanCard(
+              title: 'Monthly Premium',
+              price: '\$9.99/month',
+              features: [
+                'Unlimited Listings',
+                'Priority Support',
+                'Featured Listings',
+                'Advanced Analytics'
+              ],
+              onSelect: () => _processPurchase('monthly'),
+            ),
+            SizedBox(height: 16),
+            _buildPlanCard(
+              title: 'Annual Premium',
+              price: '\$99.99/year',
+              features: [
+                'All Monthly Features',
+                '2 Months Free',
+                'Early Access to New Features',
+                'Premium Badge'
+              ],
+              onSelect: () => _processPurchase('annual'),
+              isPopular: true,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
   Future<void> _updateProfilePicture() async {
     try {
       final XFile? image = await _picker.pickImage(
@@ -138,43 +338,116 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _showErrorSnackBar(_error);
     }
   }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Profile'),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.edit),
-            onPressed: _showEditProfileDialog,
-          ),
-          IconButton(
-            icon: Icon(Icons.settings),
-            onPressed: () {
-              Navigator.pushNamed(context, '/settings');
-            },
+  Widget _buildPlanCard({
+    required String title,
+    required String price,
+    required List<String> features,
+    required Function() onSelect,
+    bool isPopular = false,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: isPopular ? Colors.blue.shade700 : Colors.grey.shade300,
+          width: 2,
+        ),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          if (isPopular)
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.symmetric(vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade700,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
+              ),
+              child: Text(
+                'Most Popular',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          Padding(
+            padding: EdgeInsets.all(16),
+            child: Column(
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  price,
+                  style: TextStyle(
+                    fontSize: 24,
+                    color: Colors.blue.shade700,
+                  ),
+                ),
+                SizedBox(height: 16),
+                ...features.map((feature) => Padding(
+                      padding: EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Icon(Icons.check, color: Colors.green),
+                          SizedBox(width: 8),
+                          Text(feature),
+                        ],
+                      ),
+                    )),
+                SizedBox(height: 16),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor:
+                        isPopular ? Colors.blue.shade700 : Colors.grey.shade200,
+                    foregroundColor:
+                        isPopular ? Colors.white : Colors.blue.shade700,
+                  ),
+                  child: Text('Select Plan'),
+                  onPressed: onSelect,
+                ),
+              ],
+            ),
           ),
         ],
       ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadUserData,
-              child: SingleChildScrollView(
-                physics: AlwaysScrollableScrollPhysics(),
-                child: Column(
-                  children: [
-                    _buildProfileHeader(),
-                    _buildUserDetails(),
-                    _buildSettingsSection(),
-                    _buildMyListingsSection()
-                  ],
-                ),
-              ),
-            ),
     );
   }
+
+  Future<void> _processPurchase(String planType) async {
+    // Implement your payment processing logic here
+    // After successful payment:
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user!.uid)
+          .update({
+        'subscriptionStatus': 'premium',
+        'planType': planType,
+        'subscriptionStartDate': FieldValue.serverTimestamp(),
+        'subscriptionEndDate': planType == 'monthly'
+            ? DateTime.now().add(Duration(days: 30))
+            : DateTime.now().add(Duration(days: 365)),
+      });
+
+      setState(() {
+        _showUpgradePrompt = false;
+        _remainingFreeListings = -1; // Indicates premium status
+      });
+
+      Navigator.of(context).pop();
+      _showSuccessSnackBar('Successfully upgraded to premium!');
+    } catch (e) {
+      _showErrorSnackBar('Error processing purchase: $e');
+    }
+  }
+
+  // ... (rest of your existing code)
+
 
   Widget _buildProfileHeader() {
     return Container(
@@ -447,7 +720,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildMyListingsSection() {
     return UserListings(user: user);
+  } void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
+
+  void _showSuccessSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+
 
   Widget _buildListingImage(Map<String, dynamic> listing) {
     final imageUrl =
@@ -518,211 +811,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // Rest of your existing code...
-
-  // Widget _buildProfileHeader() {
-  //   return Container(
-  //     padding: EdgeInsets.all(16),
-  //     child: Column(
-  //       children: [
-  //         Stack(
-  //           children: [
-  //             CircleAvatar(
-  //               radius: 50,
-  //               backgroundImage: user?.photoURL != null
-  //                   ? NetworkImage(user!.photoURL!)
-  //                   : null,
-  //               child: user?.photoURL == null
-  //                   ? Icon(Icons.person, size: 50)
-  //                   : null,
-  //             ),
-  //             Positioned(
-  //               bottom: 0,
-  //               right: 0,
-  //               child: CircleAvatar(
-  //                 backgroundColor: Theme.of(context).primaryColor,
-  //                 radius: 18,
-  //                 child: IconButton(
-  //                   icon: Icon(Icons.camera_alt, size: 18, color: Colors.white),
-  //                   onPressed: () {
-  //                     // Implement profile photo change
-  //                   },
-  //                 ),
-  //               ),
-  //             ),
-  //           ],
-  //         ),
-  //         SizedBox(height: 16),
-  //         Text(
-  //           _nameController.text,
-  //           style: Theme.of(context).textTheme.headlineSmall,
-  //         ),
-  //         if (_locationController.text.isNotEmpty)
-  //           Text(
-  //             _locationController.text,
-  //             style: Theme.of(context).textTheme.bodyLarge,
-  //           ),
-  //         SizedBox(height: 8),
-  //         if (_bioController.text.isNotEmpty)
-  //           Text(
-  //             _bioController.text,
-  //             textAlign: TextAlign.center,
-  //             style: Theme.of(context).textTheme.bodyMedium,
-  //           ),
-  //       ],
-  //     ),
-  //   );
-  // }
-
-  // Widget _buildUserDetails() {
-  //   return Card(
-  //     margin: EdgeInsets.all(16),
-  //     child: Padding(
-  //       padding: EdgeInsets.all(16),
-  //       child: Column(
-  //         crossAxisAlignment: CrossAxisAlignment.start,
-  //         children: [
-  //           Text(
-  //             'Contact Information',
-  //             style: Theme.of(context).textTheme.titleLarge,
-  //           ),
-  //           SizedBox(height: 16),
-  //           ListTile(
-  //             leading: Icon(Icons.email),
-  //             title: Text('Email'),
-  //             subtitle: Text(_emailController.text.isNotEmpty
-  //                 ? _emailController.text
-  //                 : 'Not provided'),
-  //           ),
-  //           ListTile(
-  //             leading: Icon(Icons.phone),
-  //             title: Text('Phone'),
-  //             subtitle: Text(_phoneController.text.isNotEmpty
-  //                 ? _phoneController.text
-  //                 : 'Not provided'),
-  //           ),
-  //           if (user?.emailVerified == true)
-  //             Chip(
-  //               label: Text('Email Verified'),
-  //               avatar: Icon(Icons.verified, size: 16),
-  //               backgroundColor: Colors.green[100],
-  //             ),
-  //         ],
-  //       ),
-  //     ),
-  //   );
-  // }
-
-  // Future<void> _showEditProfileDialog() async {
-  //   await showDialog(
-  //     context: context,
-  //     builder: (context) => AlertDialog(
-  //       title: Text('Edit Profile'),
-  //       content: SingleChildScrollView(
-  //         child: Column(
-  //           mainAxisSize: MainAxisSize.min,
-  //           children: [
-  //             TextField(
-  //               controller: _nameController,
-  //               decoration: InputDecoration(
-  //                 labelText: 'Name',
-  //                 prefixIcon: Icon(Icons.person),
-  //               ),
-  //             ),
-  //             SizedBox(height: 8),
-  //             TextField(
-  //               controller: _phoneController,
-  //               decoration: InputDecoration(
-  //                 labelText: 'Phone',
-  //                 prefixIcon: Icon(Icons.phone),
-  //               ),
-  //               enabled: user?.phoneNumber ==
-  //                   null, // Only allow editing if not set in Auth
-  //             ),
-  //             SizedBox(height: 8),
-  //             TextField(
-  //               controller: _locationController,
-  //               decoration: InputDecoration(
-  //                 labelText: 'Location',
-  //                 prefixIcon: Icon(Icons.location_on),
-  //               ),
-  //             ),
-  //             SizedBox(height: 8),
-  //             TextField(
-  //               controller: _bioController,
-  //               decoration: InputDecoration(
-  //                 labelText: 'Bio',
-  //                 prefixIcon: Icon(Icons.info),
-  //               ),
-  //               maxLines: 3,
-  //             ),
-  //           ],
-  //         ),
-  //       ),
-  //       actions: [
-  //         TextButton(
-  //           child: Text('Cancel'),
-  //           onPressed: () => Navigator.pop(context),
-  //         ),
-  //         TextButton(
-  //           child: Text('Save'),
-  //           onPressed: () async {
-  //             try {
-  //               await FirebaseFirestore.instance
-  //                   .collection('users')
-  //                   .doc(user?.uid)
-  //                   .set({
-  //                 'name': _nameController.text,
-  //                 'phone': _phoneController.text,
-  //                 'location': _locationController.text,
-  //                 'bio': _bioController.text,
-  //                 'email': user?.email, // Store email from Auth
-  //               }, SetOptions(merge: true));
-  //               Navigator.pop(context);
-  //               setState(() {});
-  //             } catch (e) {
-  //               ScaffoldMessenger.of(context).showSnackBar(
-  //                 SnackBar(content: Text('Error updating profile: $e')),
-  //               );
-  //             }
-  //           },
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
-
-  // Widget _buildSettingsSection() {
-  //   return Column(
-  //     children: [
-  //       ListTile(
-  //         leading: Icon(Icons.dark_mode),
-  //         title: Text('Dark Mode'),
-  //         trailing: Switch(
-  //           value: _isDarkMode,
-  //           onChanged: (value) {
-  //             setState(() => _isDarkMode = value);
-  //             // Implement theme change
-  //           },
-  //         ),
-  //       ),
-  //       ListTile(
-  //         leading: Icon(Icons.notifications),
-  //         title: Text('Notifications'),
-  //         onTap: () {
-  //           // Navigate to notifications settings
-  //         },
-  //       ),
-  //       ListTile(
-  //         leading: Icon(Icons.security),
-  //         title: Text('Privacy & Security'),
-  //         onTap: () {
-  //           // Navigate to privacy settings
-  //         },
-  //       ),
-  //     ],
-  //   );
-  // }
 
   Future<void> _showDeleteAccountDialog() async {
     final confirmed = await showDialog<bool>(

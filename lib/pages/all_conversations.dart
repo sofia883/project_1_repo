@@ -1,101 +1,65 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:intl/intl.dart';
+import 'package:timeago/timeago.dart' as timeago;
 import 'chat_page.dart';
 
-class ConversationsListScreen extends StatelessWidget {
+class ConversationsScreen extends StatelessWidget {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Helper method to create a more user-friendly error message
-  Widget _buildErrorDisplay(String message) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, size: 48, color: Colors.red),
-            SizedBox(height: 16),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16),
-            ),
-          ],
-        ),
-      ),
-    );
+  ConversationsScreen({Key? key}) : super(key: key);
+
+  String getChatRoomId(String userId1, String userId2, String itemId) {
+    return userId1.compareTo(userId2) > 0
+        ? '${userId1}_${userId2}_$itemId'
+        : '${userId2}_${userId1}_$itemId';
   }
 
-  // Helper method to handle the Firestore query
-  Stream<QuerySnapshot> _getChatRoomsStream(String currentUserId) {
-    try {
-      return FirebaseFirestore.instance
-          .collection('chatRooms')
-          .where('participants', arrayContains: currentUserId)
-          .orderBy('lastMessageTime', descending: true)
-          // Add a secondary ordering by document ID to ensure consistent ordering
-          .orderBy(FieldPath.documentId, descending: true)
-          .snapshots();
-    } catch (e) {
-      // Return an error stream that the StreamBuilder can handle
-      return Stream.error(e);
+  String formatTimeAgo(Timestamp timestamp) {
+    final dateTime = timestamp.toDate();
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+
+    if (difference.inDays >= 1) {
+      return timeago.format(dateTime, locale: 'en_short');
+    } else if (difference.inHours >= 1) {
+      return timeago.format(dateTime, locale: 'en_short', allowFromNow: true);
+    } else if (difference.inMinutes >= 1) {
+      return '${difference.inMinutes} minutes ago';
+    } else {
+      return 'a few seconds ago';
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final currentUserId = _auth.currentUser?.uid;
-
     if (currentUserId == null) {
-      return Scaffold(
-        appBar: AppBar(title: Text('Messages')),
-        body: _buildErrorDisplay('Please login to view messages'),
-      );
+      return Center(child: Text('Please login to view conversations'));
     }
 
     return Scaffold(
       appBar: AppBar(
         title: Text('Messages'),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.search),
-            onPressed: () {
-              // Implement search functionality
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Search functionality coming soon')),
-              );
-            },
-          ),
-        ],
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _getChatRoomsStream(currentUserId),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            // Check specifically for missing index error
-            if (snapshot.error.toString().contains('FAILED_PRECONDITION')) {
-              return _buildErrorDisplay(
-                'Database index required. Please ask the administrator to set up the necessary index for the chat rooms collection.',
-              );
-            }
-            return _buildErrorDisplay(
-                'Error loading conversations: ${snapshot.error}');
-          }
-
-          if (!snapshot.hasData) {
+        stream: _firestore
+            .collection('chats')
+            .where('participants', arrayContains: currentUserId)
+            .orderBy('lastMessageTime', descending: true)
+            .snapshots(),
+        builder: (context, chatSnapshot) {
+          if (chatSnapshot.connectionState == ConnectionState.waiting) {
             return Center(child: CircularProgressIndicator());
           }
 
-          final chatRooms = snapshot.data!.docs;
-
-          if (chatRooms.isEmpty) {
+          if (!chatSnapshot.hasData || chatSnapshot.data!.docs.isEmpty) {
             return Center(
               child: Column(
-                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.chat_bubble_outline, size: 48, color: Colors.grey),
+                  Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey),
                   SizedBox(height: 16),
                   Text('No conversations yet'),
                 ],
@@ -104,76 +68,106 @@ class ConversationsListScreen extends StatelessWidget {
           }
 
           return ListView.builder(
-            itemCount: chatRooms.length,
+            itemCount: chatSnapshot.data!.docs.length,
             itemBuilder: (context, index) {
-              final chatRoom = chatRooms[index].data() as Map<String, dynamic>;
-              final otherUserId = (chatRoom['participants'] as List)
-                  .firstWhere((id) => id != currentUserId);
+              final chatDoc = chatSnapshot.data!.docs[index];
+              final chatData = chatDoc.data() as Map<String, dynamic>;
+
+              // Get the other user's ID from participants
+              final participants =
+                  List<String>.from(chatData['participants'] ?? []);
+              final otherUserId = participants.firstWhere(
+                (id) => id != currentUserId,
+                orElse: () => '',
+              );
+
+              if (otherUserId.isEmpty) return SizedBox.shrink();
+
+              // Get item details
+              final itemId = chatData['itemId'] as String?;
+              final itemName = chatData['itemName'] as String?;
 
               return FutureBuilder<DocumentSnapshot>(
-                future: FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(otherUserId)
-                    .get(),
+                future: _firestore.collection('users').doc(otherUserId).get(),
                 builder: (context, userSnapshot) {
-                  if (userSnapshot.hasError) {
+                  if (!userSnapshot.hasData) {
                     return ListTile(
-                      title: Text('Error loading user'),
-                      subtitle: Text('Please try again later'),
+                      leading: CircleAvatar(child: Icon(Icons.person)),
+                      title: Text('Loading...'),
                     );
                   }
 
-                  final userName = userSnapshot.data?.get('name') ?? 'User';
-                  final lastMessage = chatRoom['lastMessage'] ?? '';
+                  final userData =
+                      userSnapshot.data!.data() as Map<String, dynamic>?;
+                  final userName = userData?['name'] ??
+                      userData?['username'] ??
+                      'Unknown User';
+                  final userAvatar = userData?['photoUrl'];
+                  final lastMessage = chatData['lastMessage'] as String?;
                   final lastMessageTime =
-                      chatRoom['lastMessageTime'] as Timestamp?;
-                  final formattedTime = lastMessageTime != null
-                      ? DateFormat.yMMMd()
-                          .add_jm()
-                          .format(lastMessageTime.toDate())
-                      : '';
+                      chatData['lastMessageTime'] as Timestamp?;
+                  final unreadCount =
+                      chatData['unreadCount_$currentUserId'] ?? 0;
 
                   return Card(
                     margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     child: ListTile(
-                      leading: Hero(
-                        tag: 'profile_${otherUserId}',
-                        child: CircleAvatar(
-                          backgroundImage:
-                              userSnapshot.data?.get('profileImage') != null
-                                  ? NetworkImage(
-                                      userSnapshot.data!.get('profileImage'))
-                                  : null,
-                          child: userSnapshot.data?.get('profileImage') == null
-                              ? Text(userName[0].toUpperCase())
-                              : null,
-                        ),
+                      leading: CircleAvatar(
+                        backgroundImage: userAvatar != null
+                            ? NetworkImage(userAvatar)
+                            : null,
+                        child: userAvatar == null ? Icon(Icons.person) : null,
                       ),
                       title: Row(
                         children: [
                           Expanded(
-                            child: Text(
-                              userName,
-                              style: TextStyle(fontWeight: FontWeight.bold),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  userName,
+                                  style: TextStyle(
+                                    fontWeight: unreadCount > 0
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                  ),
+                                ),
+                                if (itemName != null)
+                                  Text(
+                                    'Item: $itemName',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
-                          Text(
-                            formattedTime,
-                            style: TextStyle(fontSize: 12, color: Colors.grey),
-                          ),
+                          if (lastMessageTime != null)
+                            Text(
+                              formatTimeAgo(lastMessageTime),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
                         ],
                       ),
                       subtitle: Row(
                         children: [
                           Expanded(
                             child: Text(
-                              '${chatRoom['itemName'] ?? 'Item'}: $lastMessage',
+                              lastMessage ?? 'No messages yet',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: unreadCount > 0
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
                             ),
                           ),
-                          if (chatRoom['unreadCount'] != null &&
-                              chatRoom['unreadCount'] > 0)
+                          if (unreadCount > 0)
                             Container(
                               padding: EdgeInsets.all(6),
                               decoration: BoxDecoration(
@@ -181,24 +175,32 @@ class ConversationsListScreen extends StatelessWidget {
                                 shape: BoxShape.circle,
                               ),
                               child: Text(
-                                '${chatRoom['unreadCount']}',
+                                unreadCount.toString(),
                                 style: TextStyle(
-                                    color: Colors.white, fontSize: 12),
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                         ],
                       ),
                       onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => ChatScreen(
-                              itemId: chatRoom['itemId'],
-                              sellerId: otherUserId,
-                              itemName: chatRoom['itemName'] ?? 'Item',
+                        if (itemId != null) {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) => ChatScreen(
+                                sellerId: otherUserId,
+                                itemId: itemId,
+                                itemName: itemName ?? '',
+                              ),
                             ),
-                          ),
-                        );
+                          );
+
+                          // Reset unread count
+                          chatDoc.reference.update({
+                            'unreadCount_$currentUserId': 0,
+                          });
+                        }
                       },
                     ),
                   );

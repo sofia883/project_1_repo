@@ -11,6 +11,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:project_1/services/location_service.dart';
 import 'package:project_1/services/utils.dart';
+import 'package:project_1/services/featured_service.dart';
 
 class AddItemScreen extends StatefulWidget {
   const AddItemScreen({Key? key}) : super(key: key);
@@ -25,9 +26,10 @@ class _AddItemScreenState extends State<AddItemScreen> {
   final _priceController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _addressController = TextEditingController();
   final _brandController = TextEditingController();
   final _warrantyController = TextEditingController();
+  final _addressController = TextEditingController();
+
   final _cityController = TextEditingController();
   final _stateController = TextEditingController();
   final _countryController = TextEditingController();
@@ -38,6 +40,8 @@ class _AddItemScreenState extends State<AddItemScreen> {
   String? selectedCountry;
   String? selectedState;
   String? selectedCity;
+  Position? _currentPosition;
+  bool _isFeatured = false;
 
   PhoneNumber? _phoneNumber; // Declare PhoneNumber variable
 
@@ -75,13 +79,30 @@ class _AddItemScreenState extends State<AddItemScreen> {
     }
   }
 
+  Future<void> _getCurrentLocation() async {
+    try {
+      _currentPosition = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.low, // Reduced accuracy for speed
+      );
+    } catch (e) {
+      print('Error getting location: $e');
+    }
+  }
+
   Future<List<String>> _uploadImages() async {
     List<String> imageUrls = [];
+    List<Future<String>> uploadTasks = [];
 
     try {
+      // Check if user is authenticated
+      final User? currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        throw Exception('User not authenticated');
+      }
+
       for (File imageFile in _selectedImages) {
         String fileName =
-            '${DateTime.now().millisecondsSinceEpoch}_${path.basename(imageFile.path)}';
+            '${currentUser.uid}_${DateTime.now().millisecondsSinceEpoch}_${path.basename(imageFile.path)}';
 
         firebase_storage.Reference ref = firebase_storage
             .FirebaseStorage.instance
@@ -89,43 +110,45 @@ class _AddItemScreenState extends State<AddItemScreen> {
             .child('items')
             .child(fileName);
 
-        await ref.putFile(
-          imageFile,
-          firebase_storage.SettableMetadata(
-            contentType: 'image/jpeg',
-            customMetadata: {
-              'uploaded_by': 'app_user',
-              'timestamp': DateTime.now().toString(),
-            },
-          ),
+        // Add metadata with user ID
+        firebase_storage.SettableMetadata metadata =
+            firebase_storage.SettableMetadata(
+          contentType: 'image/jpeg',
+          customMetadata: {
+            'userId': currentUser.uid,
+            'uploadedAt': DateTime.now().toString(),
+          },
         );
 
-        String downloadUrl = await ref.getDownloadURL();
-        imageUrls.add(downloadUrl);
+        // Create upload task with error handling
+        uploadTasks.add(ref
+            .putFile(imageFile, metadata)
+            .then((snapshot) => snapshot.ref.getDownloadURL())
+            .catchError((error) {
+          print('Error uploading image: $error');
+          throw error;
+        }));
       }
-    } catch (e) {
-      print('Error uploading images: $e');
-      throw e;
-    }
 
-    return imageUrls;
+      // Upload all images in parallel
+      imageUrls = await Future.wait(uploadTasks);
+      return imageUrls;
+    } catch (e) {
+      if (e.toString().contains('unauthorized')) {
+        throw Exception('Please sign in again to upload images');
+      } else {
+        throw Exception('Error uploading images: ${e.toString()}');
+      }
+    }
   }
 
+// Modified submit function with better error handling
   Future<void> _submitItem() async {
     if (!_formKey.currentState!.validate() || _selectedImages.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        const SnackBar(
             content: Text(
                 'Please fill all required fields and add at least one image')),
-      );
-      return;
-    }
-
-    if (selectedCountry == null ||
-        selectedState == null ||
-        selectedCity == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Please select country, state, and city')),
       );
       return;
     }
@@ -133,18 +156,26 @@ class _AddItemScreenState extends State<AddItemScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Get current user
+      // Check authentication first
       final User? currentUser = FirebaseAuth.instance.currentUser;
-
       if (currentUser == null) {
-        throw Exception('No user logged in');
+        throw Exception('Please sign in to add items');
       }
 
-      List<String> imageUrls = await _uploadImages();
+      // Refresh auth token if needed
+      await currentUser.reload();
+      final idToken = await currentUser.getIdToken(true);
 
-      await FirebaseFirestore.instance.collection('items').add({
+      if (idToken == null) {
+        throw Exception('Authentication error. Please sign in again.');
+      }
+
+      // Proceed with image upload and item creation
+      final imageUrls = await _uploadImages();
+
+      // Create item document
+      final itemData = {
         'viewCount': 0,
-        'lastViewed': null,
         'name': _nameController.text.trim(),
         'price': double.parse(_priceController.text.trim()),
         'description': _descriptionController.text.trim(),
@@ -158,57 +189,50 @@ class _AddItemScreenState extends State<AddItemScreen> {
             : _warrantyController.text.trim(),
         'images': imageUrls,
         'createdAt': FieldValue.serverTimestamp(),
-        'userId': currentUser.uid, // Add this line to store user ID
-        'userPhone':
-            _phoneController.text.trim(), // Add this line to store phone
-        'status': 'Active', // Add this line to set initial status
+        'userId': currentUser.uid,
+        'status': 'Active',
+        'isFeatured': _isFeatured,
+        'location': _currentPosition != null
+            ? GeoPoint(_currentPosition!.latitude, _currentPosition!.longitude)
+            : null,
         'address': {
-          'street': _addressController.text.trim(),
           'city': selectedCity,
           'state': selectedState,
           'country': selectedCountry,
-          'postalCode': _postalCodeController.text.trim(),
         },
-      });
+      };
+
+      await FirebaseFirestore.instance.collection('items').add(itemData);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Item added successfully!')),
+        const SnackBar(content: Text('Item added successfully!')),
       );
 
       _clearForm();
+      Navigator.pop(context);
     } catch (e) {
-      print('Error submitting item: $e');
+      String errorMessage = 'Error adding item: ';
+
+      if (e.toString().contains('unauthorized')) {
+        errorMessage += 'Please sign in again to continue';
+      } else if (e.toString().contains('permission-denied')) {
+        errorMessage += 'You don\'t have permission to perform this action';
+      } else {
+        errorMessage += e.toString();
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
+        SnackBar(
+          content: Text(errorMessage),
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: _submitItem,
+          ),
+        ),
       );
     } finally {
       setState(() => _isLoading = false);
-    }
-
-    try {
-      final Position position = await LocationServices.getCurrentLocation();
-      final LatLng itemLocation = LatLng(position.latitude, position.longitude);
-      String formattedAddress =
-          await LocationServices.getAddressFromCoordinates(itemLocation);
-
-      await FirebaseFirestore.instance.collection('items').add({
-        // ... your existing fields ...
-        'location': GeoPoint(position.latitude, position.longitude),
-        'formattedAddress': formattedAddress,
-        'address': {
-          'street': _addressController.text.trim(),
-          'city': selectedCity,
-          'state': selectedState,
-          'country': selectedCountry,
-          'postalCode': _postalCodeController.text.trim(),
-          'coordinates': {
-            'latitude': position.latitude,
-            'longitude': position.longitude,
-          }
-        },
-      });
-    } catch (e) {
-      // ... error handling ...
     }
   }
 
@@ -477,10 +501,6 @@ class _AddItemScreenState extends State<AddItemScreen> {
                     value?.isEmpty ?? true ? 'Required' : null,
               ),
               SizedBox(height: 16),
-
-              _buildPhoneInput(), // Replace the old phone input with this new method
-
-              SizedBox(height: 16),
               _buildAddressSection(),
               SizedBox(height: 16),
 
@@ -533,7 +553,13 @@ class _AddItemScreenState extends State<AddItemScreen> {
                     value?.isEmpty ?? true ? 'Required' : null,
               ),
               SizedBox(height: 24),
-
+              FeaturedItemWidget(
+                onFeaturedChanged: (bool value) {
+                  setState(() {
+                    _isFeatured = value;
+                  });
+                },
+              ),
               ElevatedButton(
                 onPressed: _isLoading ? null : _submitItem,
                 child:
@@ -562,5 +588,89 @@ class _AddItemScreenState extends State<AddItemScreen> {
       selectedState = null;
       selectedCity = null;
     });
+  }
+}
+
+class FeaturedItemWidget extends StatefulWidget {
+  final Function(bool) onFeaturedChanged;
+
+  FeaturedItemWidget({required this.onFeaturedChanged});
+
+  @override
+  _FeaturedItemWidgetState createState() => _FeaturedItemWidgetState();
+}
+
+class _FeaturedItemWidgetState extends State<FeaturedItemWidget> {
+  bool _isFeatured = false;
+  int _usedFeaturedItems = 0;
+  final int _maxFreeFeaturedItems = 3;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUsedFeaturedItems();
+  }
+
+  Future<void> _loadUsedFeaturedItems() async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('items')
+        .where('isFeatured', isEqualTo: true)
+        .get();
+
+    setState(() {
+      _usedFeaturedItems = snapshot.docs.length;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final remainingItems = _maxFreeFeaturedItems - _usedFeaturedItems;
+
+    return Card(
+      margin: EdgeInsets.all(16),
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Featured Item',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              remainingItems > 0
+                  ? 'You have $remainingItems free featured items remaining'
+                  : 'You have used all your free featured items',
+            ),
+            if (remainingItems <= 1) ...[
+              SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: () {
+                  // Navigate to upgrade screen
+                  Navigator.pushNamed(context, '/upgrade-plan');
+                },
+                child: Text('Upgrade to Premium'),
+              ),
+            ],
+            CheckboxListTile(
+              title: Text('Mark as Featured'),
+              value: _isFeatured,
+              onChanged: remainingItems > 0
+                  ? (value) {
+                      setState(() {
+                        _isFeatured = value ?? false;
+                        widget.onFeaturedChanged(_isFeatured);
+                      });
+                    }
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
