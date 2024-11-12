@@ -6,7 +6,6 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'user_listing_screen.dart';
 
-
 class ProfileScreen extends StatefulWidget {
   @override
   _ProfileScreenState createState() => _ProfileScreenState();
@@ -37,7 +36,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _emailController.text = user?.email ?? '';
     _phoneController.text = user?.phoneNumber ?? '';
   }
-Future<void> _loadUserData() async {
+
+  Future<void> _loadUserData() async {
     if (user == null) return;
 
     setState(() {
@@ -73,6 +73,7 @@ Future<void> _loadUserData() async {
       setState(() => _isLoading = false);
     }
   }
+
   Future<void> _checkSubscriptionStatus() async {
     if (user == null) return;
 
@@ -85,12 +86,13 @@ Future<void> _loadUserData() async {
       final userData = userDoc.data() as Map<String, dynamic>;
       final subscriptionStatus = userData['subscriptionStatus'] ?? 'free';
       final lastPostDate = userData['lastPostDate']?.toDate();
-      
+
       if (subscriptionStatus == 'free') {
         final listings = await FirebaseFirestore.instance
             .collection('items')
             .where('userId', isEqualTo: user!.uid)
-            .where('postDate', isGreaterThan: DateTime.now().subtract(Duration(days: 28)))
+            .where('postDate',
+                isGreaterThan: DateTime.now().subtract(Duration(days: 28)))
             .get();
 
         setState(() {
@@ -301,6 +303,7 @@ Future<void> _loadUserData() async {
       ),
     );
   }
+
   Future<void> _updateProfilePicture() async {
     try {
       final XFile? image = await _picker.pickImage(
@@ -338,6 +341,7 @@ Future<void> _loadUserData() async {
       _showErrorSnackBar(_error);
     }
   }
+
   Widget _buildPlanCard({
     required String title,
     required String price,
@@ -447,7 +451,6 @@ Future<void> _loadUserData() async {
   }
 
   // ... (rest of your existing code)
-
 
   Widget _buildProfileHeader() {
     return Container(
@@ -688,6 +691,14 @@ Future<void> _loadUserData() async {
             title: Text('Logout', style: TextStyle(color: Colors.red)),
             onTap: _showLogoutDialog,
           ),
+          ListTile(
+            leading: Icon(Icons.delete_forever, color: Colors.red),
+            title: Text(
+              'Delete Account',
+              style: TextStyle(color: Colors.red),
+            ),
+            onTap: _showDeleteAccountConfirmationDialog,
+          ),
         ],
       ),
     );
@@ -714,13 +725,179 @@ Future<void> _loadUserData() async {
 
     if (confirmed == true) {
       await FirebaseAuth.instance.signOut();
-      Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+      // Replace all routes with the initial route which will automatically
+      // redirect to login screen due to auth state change
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        '/',
+        (route) => false,
+      );
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      // Show loading indicator
+      setState(() => _isLoading = true);
+
+      // 1. First delete chats and messages since we need auth for permissions
+      final userChats = await FirebaseFirestore.instance
+          .collection('chats')
+          .where('participants', arrayContains: user.uid)
+          .get();
+
+      for (var chat in userChats.docs) {
+        // Delete all messages in the chat
+        final messages = await FirebaseFirestore.instance
+            .collection('chats')
+            .doc(chat.id)
+            .collection('messages')
+            .get(); // Remove the sender filter to get all messages
+
+        // Batch delete messages
+        final batch = FirebaseFirestore.instance.batch();
+        for (var message in messages.docs) {
+          batch.delete(message.reference);
+        }
+        await batch.commit();
+
+        // Delete the chat document
+        await chat.reference.delete();
+      }
+
+      // 2. Delete all user's listings and their images from Storage
+      final userListings = await FirebaseFirestore.instance
+          .collection('items')
+          .where('userId', isEqualTo: user.uid)
+          .get();
+
+      for (var doc in userListings.docs) {
+        final listingData = doc.data();
+        if (listingData['images'] != null) {
+          for (String imageUrl in listingData['images']) {
+            try {
+              final ref = FirebaseStorage.instance.refFromURL(imageUrl);
+              await ref.delete();
+            } catch (e) {
+              print('Error deleting image: $e');
+            }
+          }
+        }
+        await doc.reference.delete();
+      }
+
+      // 3. Delete profile picture from Storage if exists
+      if (user.photoURL != null) {
+        try {
+          final ref = FirebaseStorage.instance
+              .ref()
+              .child('profile_pictures')
+              .child('${user.uid}.jpg');
+          await ref.delete();
+        } catch (e) {
+          print('Error deleting profile picture: $e');
+        }
+      }
+
+      // 4. Delete user document from Firestore
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .delete();
+
+      // 5. Delete user authentication account
+      await user.delete();
+
+      // 6. Sign out to clear any remaining auth state
+      await FirebaseAuth.instance.signOut();
+
+      // 7. Show success message and navigate to login
+      if (mounted) {
+        // Check if widget is still mounted
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Account successfully deleted'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+        // Navigate to login screen and clear all routes
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          '/', // Your login route
+          (route) => false, // This removes all routes from the stack
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        // Check if widget is still mounted
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error deleting account: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showDeleteAccountConfirmationDialog() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false, // User must choose an option
+      builder: (context) => AlertDialog(
+        title: Text('Delete Account'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Are you sure you want to delete your account?'),
+            SizedBox(height: 16),
+            Text(
+              'This action will:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 8),
+            Text('• Delete all your listings and images'),
+            Text('• Remove your profile and personal data'),
+            Text('• Delete your messages and chats'),
+            Text('• Permanently delete your account'),
+            SizedBox(height: 16),
+            Text(
+              'This action cannot be undone.',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            child: Text('Cancel'),
+            onPressed: () => Navigator.pop(context, false),
+          ),
+          TextButton(
+            child: Text(
+              'Delete Account',
+              style: TextStyle(color: Colors.red),
+            ),
+            onPressed: () => Navigator.pop(context, true),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _deleteAccount();
     }
   }
 
   Widget _buildMyListingsSection() {
     return UserListings(user: user);
-  } void _showErrorSnackBar(String message) {
+  }
+
+  void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -739,8 +916,6 @@ Future<void> _loadUserData() async {
       ),
     );
   }
-
-
 
   Widget _buildListingImage(Map<String, dynamic> listing) {
     final imageUrl =
@@ -810,7 +985,6 @@ Future<void> _loadUserData() async {
       },
     );
   }
-
 
   Future<void> _showDeleteAccountDialog() async {
     final confirmed = await showDialog<bool>(

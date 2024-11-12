@@ -1,4 +1,3 @@
-// lib/screens/auth_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -20,6 +19,11 @@ class _AuthScreenState extends State<AuthScreen>
   String? _verificationId;
   final _auth = FirebaseAuth.instance;
 
+  // Add loading state variables
+  bool _isLoadingOTP = false;
+  bool _isVerifyingOTP = false;
+  bool _isSigningIn = false;
+
   @override
   void initState() {
     super.initState();
@@ -37,14 +41,17 @@ class _AuthScreenState extends State<AuthScreen>
   }
 
   Future<void> _sendOTP() async {
+    setState(() => _isLoadingOTP = true);
     try {
       await _auth.verifyPhoneNumber(
         phoneNumber: _phoneController.text,
         verificationCompleted: (PhoneAuthCredential credential) async {
+          setState(() => _isLoadingOTP = false);
           await _auth.signInWithCredential(credential);
           _navigateToHome();
         },
         verificationFailed: (FirebaseAuthException e) {
+          setState(() => _isLoadingOTP = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(e.message ?? 'Verification Failed')),
           );
@@ -53,17 +60,20 @@ class _AuthScreenState extends State<AuthScreen>
           setState(() {
             _verificationId = verificationId;
             _codeSent = true;
+            _isLoadingOTP = false;
           });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('OTP sent successfully')),
           );
         },
         codeAutoRetrievalTimeout: (String verificationId) {
+          setState(() => _isLoadingOTP = false);
           _verificationId = verificationId;
         },
         timeout: const Duration(seconds: 60),
       );
     } catch (e) {
+      setState(() => _isLoadingOTP = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString())),
       );
@@ -71,6 +81,7 @@ class _AuthScreenState extends State<AuthScreen>
   }
 
   Future<void> _verifyOTP() async {
+    setState(() => _isVerifyingOTP = true);
     try {
       if (_verificationId != null) {
         PhoneAuthCredential credential = PhoneAuthProvider.credential(
@@ -81,6 +92,7 @@ class _AuthScreenState extends State<AuthScreen>
         _navigateToHome();
       }
     } catch (e) {
+      setState(() => _isVerifyingOTP = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString())),
       );
@@ -88,6 +100,7 @@ class _AuthScreenState extends State<AuthScreen>
   }
 
   Future<void> _signInWithEmail() async {
+    setState(() => _isSigningIn = true);
     try {
       await _auth.signInWithEmailAndPassword(
         email: _emailController.text,
@@ -95,6 +108,7 @@ class _AuthScreenState extends State<AuthScreen>
       );
       _navigateToHome();
     } catch (e) {
+      setState(() => _isSigningIn = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString())),
       );
@@ -105,106 +119,35 @@ class _AuthScreenState extends State<AuthScreen>
     Navigator.pushReplacementNamed(context, '/home');
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey[50],
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return SingleChildScrollView(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minHeight: constraints.maxHeight,
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const SizedBox(height: 20),
-                      // App Logo or Title
-                      const Icon(
-                        Icons.lock_outline_rounded,
-                        size: 48, // Reduced from 64
-                        color: Colors.black87,
-                      ),
-                      const SizedBox(height: 16), // Reduced from 24
-                      const Text(
-                        'Welcome',
-                        style: TextStyle(
-                          fontSize: 20, // Reduced from 24
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 20), // Reduced from 32
-                      // Auth Card
-                      Container(
-                        constraints: BoxConstraints(
-                          maxHeight: constraints.maxHeight * 0.6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.08),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Tab Bar
-                            TabBar(
-                              controller: _tabController,
-                              labelColor: Colors.black,
-                              unselectedLabelColor: Colors.grey,
-                              indicatorColor: Colors.amber,
-                              
-                              tabs: const [
-                                Tab(
-                                  icon: Icon(Icons.phone),
-                                  text: 'Phone',
-                                ),
-                                Tab(
-                                  icon: Icon(Icons.email),
-                                  text: 'Email',
-                                ),
-                              ],
-                            ),
-                            // Tab Views
-                            Expanded(
-                              child: TabBarView(
-                                controller: _tabController,
-                                children: [
-                                  // Phone Authentication View
-                                  Padding(
-                                    padding: const EdgeInsets.all(16.0),
-                                    child: !_codeSent
-                                        ? _buildPhoneInput()
-                                        : _buildOTPInput(),
-                                  ),
-                                  // Email Authentication View
-                                  Padding(
-                                    padding: const EdgeInsets.all(16.0),
-                                    child: _buildEmailInput(),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
+  Widget _buildLoadingButton({
+    required bool isLoading,
+    required VoidCallback onPressed,
+    required String text,
+  }) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: isLoading ? null : onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.amber,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
         ),
+        child: isLoading
+            ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.black87),
+                ),
+              )
+            : Text(
+                text,
+                style: const TextStyle(color: Colors.black87),
+              ),
       ),
     );
   }
@@ -229,22 +172,10 @@ class _AuthScreenState extends State<AuthScreen>
           ),
         ),
         const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _sendOTP,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.amber,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: const Text(
-              'Send OTP',
-              style: TextStyle(color: Colors.black87),
-            ),
-          ),
+        _buildLoadingButton(
+          isLoading: _isLoadingOTP,
+          onPressed: _sendOTP,
+          text: 'Send OTP',
         ),
       ],
     );
@@ -270,22 +201,10 @@ class _AuthScreenState extends State<AuthScreen>
           ),
         ),
         const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _verifyOTP,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.amber,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: const Text(
-              'Verify OTP',
-              style: TextStyle(color: Colors.black87),
-            ),
-          ),
+        _buildLoadingButton(
+          isLoading: _isVerifyingOTP,
+          onPressed: _verifyOTP,
+          text: 'Verify OTP',
         ),
       ],
     );
@@ -310,7 +229,7 @@ class _AuthScreenState extends State<AuthScreen>
             ),
           ),
         ),
-        const SizedBox(height: 8), // Reduced spacing
+        const SizedBox(height: 8),
         TextField(
           controller: _passwordController,
           obscureText: true,
@@ -327,24 +246,110 @@ class _AuthScreenState extends State<AuthScreen>
           ),
         ),
         const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _signInWithEmail,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.amber,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: const Text(
-              'Sign In',
-              style: TextStyle(color: Colors.black87),
-            ),
-          ),
+        _buildLoadingButton(
+          isLoading: _isSigningIn,
+          onPressed: _signInWithEmail,
+          text: 'Sign In',
         ),
       ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Rest of the build method remains unchanged
+    return Scaffold(
+      backgroundColor: Colors.grey[50],
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const SizedBox(height: 20),
+                      const Icon(
+                        Icons.lock_outline_rounded,
+                        size: 48,
+                        color: Colors.black87,
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Welcome',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Container(
+                        constraints: BoxConstraints(
+                          maxHeight: constraints.maxHeight * 0.6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.08),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TabBar(
+                              controller: _tabController,
+                              labelColor: Colors.black,
+                              unselectedLabelColor: Colors.grey,
+                              indicatorColor: Colors.amber,
+                              tabs: const [
+                                Tab(
+                                  icon: Icon(Icons.phone),
+                                  text: 'Phone',
+                                ),
+                                Tab(
+                                  icon: Icon(Icons.email),
+                                  text: 'Email',
+                                ),
+                              ],
+                            ),
+                            Expanded(
+                              child: TabBarView(
+                                controller: _tabController,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.all(16.0),
+                                    child: !_codeSent
+                                        ? _buildPhoneInput()
+                                        : _buildOTPInput(),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.all(16.0),
+                                    child: _buildEmailInput(),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }

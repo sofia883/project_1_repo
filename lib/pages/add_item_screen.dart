@@ -283,7 +283,6 @@ class _AddItemScreenState extends State<AddItemScreen> {
     );
   }
 
-  // Replace the address TextFormFields with CSC Picker
   Widget _buildAddressSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -298,58 +297,15 @@ class _AddItemScreenState extends State<AddItemScreen> {
         SizedBox(height: 16),
         LocationPickerWidget(
           onLocationSelected: (position, address) async {
-            // Update the address fields based on the selected location
-            final addressComponents =
-                await LocationServices.getAddressComponents(
-              LatLng(position.latitude, position.longitude),
-            );
-
             setState(() {
-              selectedCountry = addressComponents['country'];
-              selectedState = addressComponents['state'];
-              selectedCity = addressComponents['city'];
+              _currentPosition = position;
+              selectedCountry = address['country'];
+              selectedState = address['state'];
+              selectedCity = address['city'];
             });
           },
         ),
-        SizedBox(height: 16),
-        CSCPicker(
-          layout: Layout.vertical,
-          flagState: CountryFlag.ENABLE,
-          dropdownDecoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey),
-          ),
-          disabledDropdownDecoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey.shade300),
-          ),
-          countryDropdownLabel: "Select Country",
-          stateDropdownLabel: "Select State",
-          cityDropdownLabel: "Select City",
-          selectedItemStyle: TextStyle(
-            color: Colors.black,
-            fontSize: 14,
-          ),
-          dropdownHeadingStyle: TextStyle(
-            color: Colors.black,
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-          dropdownItemStyle: TextStyle(
-            color: Colors.black,
-            fontSize: 14,
-          ),
-          onCountryChanged: (country) {
-            setState(() => selectedCountry = country);
-          },
-          onStateChanged: (state) {
-            setState(() => selectedState = state);
-          },
-          onCityChanged: (city) {
-            setState(() => selectedCity = city);
-          },
-        ),
-        SizedBox(height: 16),
+        // Only show CSC picker if location not selected via GPS
       ],
     );
   }

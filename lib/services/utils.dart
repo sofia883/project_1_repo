@@ -332,75 +332,404 @@ class FilterService {
 }
 
 class LocationPickerWidget extends StatefulWidget {
-  final Function(Position, String) onLocationSelected;
+  final Function(Position, Map<String, String>) onLocationSelected;
+  final bool isRequired = true; // Made required by default
 
-  LocationPickerWidget({required this.onLocationSelected});
+  const LocationPickerWidget({
+    Key? key,
+    required this.onLocationSelected,
+  }) : super(key: key);
 
   @override
   _LocationPickerWidgetState createState() => _LocationPickerWidgetState();
 }
 
 class _LocationPickerWidgetState extends State<LocationPickerWidget> {
-  bool _isLoadingLocation = false;
-  String? _currentAddress;
-  TextEditingController _addressController = TextEditingController();
+  Position? _currentPosition;
+  GoogleMapController? _mapController;
+  Set<Marker> _markers = {};
+  bool _isLoading = false;
+  String _selectedAddress = '';
+  String? selectedCountry;
+  String? selectedState;
+  String? selectedCity;
+
+  @override
+  void initState() {
+    super.initState();
+    // Show location picker automatically if no location is selected
+    if (_selectedAddress.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showLocationPicker();
+      });
+    }
+  }
+
+  Future<void> _showLocationPicker() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.3,
+        padding: EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Select Location Method',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 20),
+            ElevatedButton.icon(
+              icon: Icon(Icons.my_location),
+              label: Text('Use Current Location'),
+              onPressed: () {
+                Navigator.pop(context);
+                _getCurrentLocation();
+              },
+            ),
+            SizedBox(height: 12),
+            OutlinedButton.icon(
+              icon: Icon(Icons.edit_location),
+              label: Text('Add Manually'),
+              onPressed: () {
+                Navigator.pop(context);
+                _showManualAddressSheet();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Future<void> _getCurrentLocation() async {
-    setState(() {
-      _isLoadingLocation = true;
-    });
-
+    setState(() => _isLoading = true);
     try {
-      Position position = await Geolocator.getCurrentPosition();
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permission denied');
+        }
+      }
+
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      setState(() {
+        _currentPosition = position;
+        _markers = {
+          Marker(
+            markerId: MarkerId('current_location'),
+            position: LatLng(position.latitude, position.longitude),
+            infoWindow: InfoWindow(title: 'Your Location'),
+          ),
+        };
+      });
+
+      // Show map screen immediately after getting location
+      _showMapScreen(position);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _showManualAddressSheet() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Enter Address Manually',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  icon: Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            CSCPicker(
+              layout: Layout.vertical,
+              flagState: CountryFlag.ENABLE,
+              dropdownDecoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey),
+              ),
+              countryDropdownLabel: "Select Country",
+              stateDropdownLabel: "Select State",
+              cityDropdownLabel: "Select City",
+              onCountryChanged: (country) {
+                setState(() => selectedCountry = country);
+              },
+              onStateChanged: (state) {
+                setState(() => selectedState = state);
+              },
+              onCityChanged: (city) {
+                setState(() => selectedCity = city);
+              },
+            ),
+            SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () async {
+                if (selectedCountry != null &&
+                    selectedState != null &&
+                    selectedCity != null) {
+                  await _handleManualAddress();
+                  Navigator.pop(context);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Please select all fields')),
+                  );
+                }
+              },
+              child: Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleManualAddress() async {
+    setState(() => _isLoading = true);
+    try {
+      // Construct address string
+      String addressString =
+          '${selectedCity}, ${selectedState}, ${selectedCountry}';
+
+      // Get coordinates from address using geocoding
+      List<Location> locations = await locationFromAddress(addressString);
+
+      if (locations.isNotEmpty) {
+        // Create Position object from the first location
+        Position newPosition = Position(
+          latitude: locations.first.latitude,
+          longitude: locations.first.longitude,
+          timestamp: DateTime.now(),
+          accuracy: 0,
+          altitude: 0,
+          heading: 0,
+          speed: 0,
+          speedAccuracy: 0,
+          altitudeAccuracy: 0,
+          headingAccuracy: 0,
+        );
+
+        // Update markers
+        setState(() {
+          _markers = {
+            Marker(
+              markerId: MarkerId('selected_location'),
+              position: LatLng(newPosition.latitude, newPosition.longitude),
+              infoWindow: InfoWindow(title: 'Selected Location'),
+            ),
+          };
+        });
+
+        // Update selected address and notify parent
+        setState(() {
+          _selectedAddress = addressString;
+          _currentPosition = newPosition;
+        });
+
+        // Notify parent widget
+        widget.onLocationSelected(newPosition, {
+          'street': '',
+          'city': selectedCity ?? '',
+          'state': selectedState ?? '',
+          'country': selectedCountry ?? '',
+          'postalCode': '',
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location coordinates: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  void _showMapScreen(Position position) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          appBar: AppBar(
+            title: Text('Select Location'),
+          ),
+          body: Stack(
+            children: [
+              GoogleMap(
+                initialCameraPosition: CameraPosition(
+                  target: LatLng(position.latitude, position.longitude),
+                  zoom: 16,
+                ),
+                markers: _markers,
+                onMapCreated: (controller) => _mapController = controller,
+                myLocationEnabled: true,
+                myLocationButtonEnabled: true,
+                zoomControlsEnabled: true,
+                onTap: (latLng) {
+                  setState(() {
+                    _markers = {
+                      Marker(
+                        markerId: MarkerId('selected_location'),
+                        position: latLng,
+                        infoWindow: InfoWindow(title: 'Selected Location'),
+                      ),
+                    };
+                  });
+                },
+              ),
+              Positioned(
+                bottom: 30,
+                left: 20,
+                right: 20,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: () async {
+                    if (_markers.isNotEmpty) {
+                      final marker = _markers.first;
+                      final newPosition = Position(
+                        latitude: marker.position.latitude,
+                        longitude: marker.position.longitude,
+                        timestamp: DateTime.now(),
+                        accuracy: 0,
+                        altitude: 0,
+                        heading: 0,
+                        speed: 0,
+                        speedAccuracy: 0,
+                        altitudeAccuracy: 0,
+                        headingAccuracy: 0,
+                      );
+                      await _getAddressFromPosition(newPosition);
+                      Navigator.pop(context);
+                    }
+                  },
+                  child: Text('Confirm Location'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _getAddressFromPosition(Position position) async {
+    try {
       List<Placemark> placemarks = await placemarkFromCoordinates(
         position.latitude,
         position.longitude,
       );
 
       if (placemarks.isNotEmpty) {
-        Placemark place = placemarks[0];
-        _currentAddress =
-            '${place.street}, ${place.locality}, ${place.administrativeArea}';
-        _addressController.text = _currentAddress!;
-        widget.onLocationSelected(position, _currentAddress!);
+        Placemark place = placemarks.first;
+        setState(() {
+          _selectedAddress =
+              '${place.street}, ${place.subLocality}, ${place.locality}, ${place.administrativeArea}, ${place.country}';
+          _currentPosition = position;
+        });
+
+        widget.onLocationSelected(position, {
+          'street': place.street ?? '',
+          'city': place.locality ?? '',
+          'state': place.administrativeArea ?? '',
+          'country': place.country ?? '',
+          'postalCode': place.postalCode ?? '',
+        });
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error getting location: $e')),
-      );
-    } finally {
-      setState(() {
-        _isLoadingLocation = false;
-      });
+      print('Error getting address: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        TextFormField(
-          controller: _addressController,
-          decoration: InputDecoration(
-            labelText: 'Address',
-            border: OutlineInputBorder(),
-            suffixIcon: _isLoadingLocation
-                ? CircularProgressIndicator()
-                : IconButton(
-                    icon: Icon(Icons.my_location),
-                    onPressed: _getCurrentLocation,
-                  ),
+    return Container(
+      margin: EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Location',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              Text(
+                ' *',
+                style: TextStyle(fontSize: 16, color: Colors.red),
+              ),
+            ],
           ),
-        ),
-        if (_currentAddress != null)
-          Padding(
-            padding: EdgeInsets.only(top: 8),
-            child: Text(
-              'Current Location: $_currentAddress',
-              style: TextStyle(color: Colors.green),
+          SizedBox(height: 8),
+          InkWell(
+            onTap: _showLocationPicker,
+            child: Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.location_on),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _selectedAddress.isNotEmpty
+                          ? _selectedAddress
+                          : 'Select Location',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (_isLoading)
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else if (_selectedAddress.isNotEmpty)
+                    TextButton(
+                      onPressed: _showLocationPicker,
+                      child: Text('Change'),
+                    ),
+                ],
+              ),
             ),
           ),
-      ],
+        ],
+      ),
     );
   }
 }
