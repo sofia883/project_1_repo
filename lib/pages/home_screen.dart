@@ -107,7 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: Icon(Icons.add, color: Colors.black),
               onPressed: () => Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => AddItemScreen()),
+                MaterialPageRoute(builder: (_) => ItemWizard()),
               ).then((_) => setState(() {})),
             ),
           ],
@@ -267,8 +267,30 @@ class _HomeScreenState extends State<HomeScreen> {
               });
             }
 
-            // Build grid with the data
-            return _buildGridContent(data.docs);
+            // Sort the documents to show featured items first, then non-featured sorted by createdAt
+            final sortedDocs = List<QueryDocumentSnapshot>.from(data.docs)
+              ..sort((a, b) {
+                final aIsFeatured =
+                    (a.data() as Map<String, dynamic>)['isFeatured'] ?? false;
+                final bIsFeatured =
+                    (b.data() as Map<String, dynamic>)['isFeatured'] ?? false;
+
+                if (aIsFeatured && !bIsFeatured) {
+                  return -1; // a comes before b
+                } else if (!aIsFeatured && bIsFeatured) {
+                  return 1; // b comes before a
+                } else {
+                  // For non-featured items, sort by createdAt in descending order
+                  final aCreatedAt = (a.data()
+                      as Map<String, dynamic>)['createdAt'] as Timestamp;
+                  final bCreatedAt = (b.data()
+                      as Map<String, dynamic>)['createdAt'] as Timestamp;
+                  return bCreatedAt.compareTo(aCreatedAt);
+                }
+              });
+
+            // Build grid with the sorted data
+            return _buildGridContent(sortedDocs);
           },
         );
       },
@@ -575,7 +597,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showFilterDialog(BuildContext context) async {
-    await _filterService.showFilterDialog(context);
+    await _filterService.showFilterBottomSheet(context);
     setState(() {});
   }
 }

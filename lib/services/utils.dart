@@ -10,6 +10,9 @@ import 'package:geocoding/geocoding.dart';
 import 'package:project_1/pages/detailed_screen.dart';
 
 import 'package:geolocator/geolocator.dart';
+import 'package:flutter/material.dart';
+import 'package:smooth_page_indicator/smooth_page_indicator.dart';
+import 'dart:io';
 
 class Utils {
   static final List<String> categories = [
@@ -53,6 +56,7 @@ class FilterService {
   String? selectedCountry;
   String? selectedTimeFrame;
   bool isLoading = false;
+  Position? currentPosition;
 
   static const Map<String, Duration> timeFrames = {
     'Last 24 Hours': Duration(hours: 24),
@@ -73,6 +77,195 @@ class FilterService {
     selectedCountry = null;
     selectedState = null;
     selectedCity = null;
+    currentPosition = null;
+  }
+
+  void resetAllFilters() {
+    priceRange = const RangeValues(0, 1000);
+    isPriceFilterActive = false;
+    selectedCity = null;
+    selectedCountry = null;
+    selectedTimeFrame = null;
+    _loadingController.add(false);
+  }
+
+  Future<void> _getCurrentLocation(BuildContext context) async {
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permission denied');
+        }
+      }
+
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+
+      if (placemarks.isNotEmpty) {
+        Placemark place = placemarks.first;
+        selectedCity = place.locality;
+        selectedState = place.administrativeArea;
+        selectedCountry = place.country;
+        currentPosition = position;
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location: $e')),
+      );
+    }
+  }
+
+  Future<void> showFilterBottomSheet(BuildContext context) async {
+    RangeValues tempPriceRange = priceRange;
+    bool tempIsPriceFilterActive = isPriceFilterActive;
+    String? tempCountry = selectedCountry;
+    String? tempState = selectedState;
+    String? tempCity = selectedCity;
+    String? tempTimeFrame = selectedTimeFrame;
+    String? tempFormattedAddress;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return DraggableScrollableSheet(
+              initialChildSize: 0.9,
+              minChildSize: 0.5,
+              maxChildSize: 0.95,
+              expand: false,
+              builder: (context, scrollController) {
+                return SingleChildScrollView(
+                  controller: scrollController,
+                  child: Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Filter Options',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            IconButton(
+                              icon: Icon(Icons.close),
+                              onPressed: () => Navigator.pop(context),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 20),
+                        Text('Price Range',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        RangeSlider(
+                          values: tempPriceRange,
+                          min: 0,
+                          max: 1000,
+                          divisions: 20,
+                          labels: RangeLabels(
+                            '\$${tempPriceRange.start.toStringAsFixed(0)}',
+                            '\$${tempPriceRange.end.toStringAsFixed(0)}',
+                          ),
+                          onChanged: (values) => setState(() {
+                            tempPriceRange = values;
+                            tempIsPriceFilterActive = true;
+                          }),
+                        ),
+                        SizedBox(height: 20),
+                        Text('Location',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        SizedBox(height: 8),
+                        LocationPickerWidget(
+                          onLocationSelected: (address, lat, lng) {
+                            // Handle the selected location here
+                            print('Selected address: $address');
+                            print('Latitude: $lat, Longitude: $lng');
+                          },
+                        ),
+                        SizedBox(height: 20),
+                        Text('Time Frame',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        DropdownButton<String>(
+                          value: tempTimeFrame,
+                          isExpanded: true,
+                          hint: Text('Select Time Frame'),
+                          items: [
+                            DropdownMenuItem(
+                                value: null, child: Text('All Time')),
+                            ...timeFrames.keys.map((String time) {
+                              return DropdownMenuItem(
+                                  value: time, child: Text(time));
+                            }).toList(),
+                          ],
+                          onChanged: (value) =>
+                              setState(() => tempTimeFrame = value),
+                        ),
+                        SizedBox(height: 20),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            TextButton(
+                              child: Text('Reset'),
+                              onPressed: () {
+                                setState(() {
+                                  tempPriceRange = const RangeValues(0, 1000);
+                                  tempIsPriceFilterActive = false;
+                                  tempCountry = null;
+                                  tempState = null;
+                                  tempCity = null;
+                                  tempTimeFrame = null;
+                                  tempFormattedAddress = null;
+                                });
+                              },
+                            ),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                              ),
+                              child: Text('Apply Filters'),
+                              onPressed: () async {
+                                // Apply filters
+                                priceRange = tempPriceRange;
+                                isPriceFilterActive = tempIsPriceFilterActive;
+                                selectedCountry = tempCountry;
+                                selectedState = tempState;
+                                selectedCity = tempCity;
+                                selectedTimeFrame = tempTimeFrame;
+
+                                Navigator.pop(context);
+                                _loadingController.add(true);
+                                await Future.delayed(Duration(seconds: 2));
+                                _loadingController.add(false);
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
   }
 
   Query getFilteredQuery() {
@@ -116,157 +309,6 @@ class FilterService {
     return query;
   }
 
-  Future<void> showFilterDialog(BuildContext context) async {
-    RangeValues tempPriceRange = priceRange;
-    bool tempIsPriceFilterActive = isPriceFilterActive;
-    String? tempCountry = selectedCountry;
-    String? tempState = selectedState;
-    String? tempCity = selectedCity;
-    String? tempTimeFrame = selectedTimeFrame;
-
-    await showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: Text('Filter Options'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Price Range',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    RangeSlider(
-                      values: tempPriceRange,
-                      min: 0,
-                      max: 1000,
-                      divisions: 20,
-                      labels: RangeLabels(
-                        '\$${tempPriceRange.start.toStringAsFixed(0)}',
-                        '\$${tempPriceRange.end.toStringAsFixed(0)}',
-                      ),
-                      onChanged: (values) => setState(() {
-                        tempPriceRange = values;
-                        tempIsPriceFilterActive = true;
-                      }),
-                    ),
-                    SizedBox(height: 16),
-                    Text('Location',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    SizedBox(height: 8),
-                    // CSC Picker Widget
-                    CSCPicker(
-                      layout: Layout.vertical,
-                      flagState: CountryFlag.ENABLE,
-                      dropdownDecoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey),
-                      ),
-                      disabledDropdownDecoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      countryDropdownLabel: "Select Country",
-                      stateDropdownLabel: "Select State",
-                      cityDropdownLabel: "Select City",
-
-                      selectedItemStyle: TextStyle(
-                        color: Colors.black,
-                        fontSize: 14,
-                      ),
-                      dropdownHeadingStyle: TextStyle(
-                        color: Colors.black,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      dropdownItemStyle: TextStyle(
-                        color: Colors.black,
-                        fontSize: 14,
-                      ),
-                      //                 defaultCountry: tempCountry != null
-                      // ? DefaultCountry.values.firstWhere(
-                      //     (c) => c.toString().split('.').last == tempCountry,
-                      //     orElse: () => DefaultCountry.INDIA) // Changed to INDIA
-                      // : DefaultCountry.INDIA, // Changed to INDIA
-
-                      onCountryChanged: (country) {
-                        setState(() => tempCountry = country);
-                      },
-                      onStateChanged: (state) {
-                        setState(() => tempState = state);
-                      },
-                      onCityChanged: (city) {
-                        setState(() => tempCity = city);
-                      },
-                    ),
-                    SizedBox(height: 16),
-                    Text('Time Frame',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    DropdownButton<String>(
-                      value: tempTimeFrame,
-                      isExpanded: true,
-                      hint: Text('Select Time Frame'),
-                      items: [
-                        DropdownMenuItem(value: null, child: Text('All Time')),
-                        ...timeFrames.keys.map((String time) {
-                          return DropdownMenuItem(
-                              value: time, child: Text(time));
-                        }).toList(),
-                      ],
-                      onChanged: (value) =>
-                          setState(() => tempTimeFrame = value),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  child: Text('Reset'),
-                  onPressed: () {
-                    setState(() {
-                      tempPriceRange = const RangeValues(0, 1000);
-                      tempIsPriceFilterActive = false;
-                      tempCountry = null;
-                      tempState = null;
-                      tempCity = null;
-                      tempTimeFrame = null;
-                    });
-                  },
-                ),
-                TextButton(
-                  child: Text('Cancel'),
-                  onPressed: () => Navigator.pop(context),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                  ),
-                  child: Text('Apply'),
-                  onPressed: () async {
-                    // Apply filters
-                    priceRange = tempPriceRange;
-                    isPriceFilterActive = tempIsPriceFilterActive;
-                    selectedCountry = tempCountry;
-                    selectedState = tempState;
-                    selectedCity = tempCity;
-                    selectedTimeFrame = tempTimeFrame;
-
-                    Navigator.pop(context);
-                    _loadingController.add(true);
-                    await Future.delayed(Duration(seconds: 2));
-                    _loadingController.add(false);
-                  },
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   String _getEmptyStateMessage() {
     List<String> conditions = [];
 
@@ -296,15 +338,6 @@ class FilterService {
     return 'No items found with ${conditions.join(", ")}';
   }
 
-  void resetAllFilters() {
-    priceRange = const RangeValues(0, 1000);
-    isPriceFilterActive = false;
-    selectedCity = null;
-    selectedCountry = null;
-    selectedTimeFrame = null;
-    _loadingController.add(false);
-  }
-
   Widget buildEmptyState() {
     return Center(
       child: Column(
@@ -332,8 +365,7 @@ class FilterService {
 }
 
 class LocationPickerWidget extends StatefulWidget {
-  final Function(Position, Map<String, String>) onLocationSelected;
-  final bool isRequired = true; // Made required by default
+  final Function(String address, double lat, double lng) onLocationSelected;
 
   const LocationPickerWidget({
     Key? key,
@@ -345,60 +377,48 @@ class LocationPickerWidget extends StatefulWidget {
 }
 
 class _LocationPickerWidgetState extends State<LocationPickerWidget> {
-  Position? _currentPosition;
-  GoogleMapController? _mapController;
-  Set<Marker> _markers = {};
-  bool _isLoading = false;
-  String _selectedAddress = '';
+  String? selectedAddress;
+  bool isLoading = false;
+  bool isSaving = false;
+
+  // CSC Picker state
   String? selectedCountry;
   String? selectedState;
   String? selectedCity;
 
-  @override
-  void initState() {
-    super.initState();
-    // Show location picker automatically if no location is selected
-    if (_selectedAddress.isEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _showLocationPicker();
-      });
-    }
-  }
-
-  Future<void> _showLocationPicker() async {
-    await showModalBottomSheet(
+  void _showLocationOptions() {
+    showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.3,
-        padding: EdgeInsets.all(20),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(16.0),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               'Select Location Method',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             SizedBox(height: 20),
-            ElevatedButton.icon(
-              icon: Icon(Icons.my_location),
-              label: Text('Use Current Location'),
-              onPressed: () {
+            ListTile(
+              leading: Icon(Icons.my_location),
+              title: Text('Use Current Location'),
+              onTap: () {
                 Navigator.pop(context);
                 _getCurrentLocation();
               },
             ),
-            SizedBox(height: 12),
-            OutlinedButton.icon(
-              icon: Icon(Icons.edit_location),
-              label: Text('Add Manually'),
-              onPressed: () {
+            ListTile(
+              leading: Icon(Icons.edit_location),
+              title: Text('Add Manually'),
+              onTap: () {
                 Navigator.pop(context);
-                _showManualAddressSheet();
+                _showManualLocationPicker();
               },
             ),
           ],
@@ -407,8 +427,108 @@ class _LocationPickerWidgetState extends State<LocationPickerWidget> {
     );
   }
 
+  bool get isCSCComplete =>
+      selectedCountry != null && selectedState != null && selectedCity != null;
+
+  void _showManualLocationPicker() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Container(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+            left: 16,
+            right: 16,
+            top: 16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Enter Location Details',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              SizedBox(height: 20),
+              CSCPicker(
+                showStates: true,
+                showCities: true,
+                flagState: CountryFlag.ENABLE,
+                dropdownDecoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey),
+                ),
+                onCountryChanged: (country) {
+                  setState(() {
+                    selectedCountry = country;
+                    selectedState = null;
+                    selectedCity = null;
+                  });
+                },
+                onStateChanged: (state) {
+                  setState(() {
+                    selectedState = state;
+                    selectedCity = null;
+                  });
+                },
+                onCityChanged: (city) {
+                  setState(() {
+                    selectedCity = city;
+                  });
+                },
+              ),
+              SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: !isCSCComplete || isSaving
+                      ? null
+                      : () async {
+                          setState(() => isSaving = true);
+                          await Future.delayed(Duration(seconds: 1));
+                          final address =
+                              '$selectedCity, $selectedState, $selectedCountry';
+                          this.setState(() {
+                            selectedAddress = address;
+                            isSaving = false;
+                          });
+                          widget.onLocationSelected(address, 0, 0);
+                          Navigator.pop(context);
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isCSCComplete
+                        ? Colors.orange
+                        : null, // Set color to orange
+                    disabledBackgroundColor: Colors.grey[300],
+                  ),
+                  child: isSaving
+                      ? SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : Text('Save Location'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _getCurrentLocation() async {
-    setState(() => _isLoading = true);
+    setState(() => isLoading = true);
     try {
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
@@ -418,397 +538,149 @@ class _LocationPickerWidgetState extends State<LocationPickerWidget> {
         }
       }
 
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-
-      setState(() {
-        _currentPosition = position;
-        _markers = {
-          Marker(
-            markerId: MarkerId('current_location'),
-            position: LatLng(position.latitude, position.longitude),
-            infoWindow: InfoWindow(title: 'Your Location'),
-          ),
-        };
-      });
-
-      // Show map screen immediately after getting location
-      _showMapScreen(position);
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error getting location: $e')),
-      );
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _showManualAddressSheet() async {
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Enter Address Manually',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                IconButton(
-                  icon: Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
-            ),
-            CSCPicker(
-              layout: Layout.vertical,
-              flagState: CountryFlag.ENABLE,
-              dropdownDecoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey),
-              ),
-              countryDropdownLabel: "Select Country",
-              stateDropdownLabel: "Select State",
-              cityDropdownLabel: "Select City",
-              onCountryChanged: (country) {
-                setState(() => selectedCountry = country);
-              },
-              onStateChanged: (state) {
-                setState(() => selectedState = state);
-              },
-              onCityChanged: (city) {
-                setState(() => selectedCity = city);
-              },
-            ),
-            SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () async {
-                if (selectedCountry != null &&
-                    selectedState != null &&
-                    selectedCity != null) {
-                  await _handleManualAddress();
-                  Navigator.pop(context);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Please select all fields')),
-                  );
-                }
-              },
-              child: Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _handleManualAddress() async {
-    setState(() => _isLoading = true);
-    try {
-      // Construct address string
-      String addressString =
-          '${selectedCity}, ${selectedState}, ${selectedCountry}';
-
-      // Get coordinates from address using geocoding
-      List<Location> locations = await locationFromAddress(addressString);
-
-      if (locations.isNotEmpty) {
-        // Create Position object from the first location
-        Position newPosition = Position(
-          latitude: locations.first.latitude,
-          longitude: locations.first.longitude,
-          timestamp: DateTime.now(),
-          accuracy: 0,
-          altitude: 0,
-          heading: 0,
-          speed: 0,
-          speedAccuracy: 0,
-          altitudeAccuracy: 0,
-          headingAccuracy: 0,
-        );
-
-        // Update markers
-        setState(() {
-          _markers = {
-            Marker(
-              markerId: MarkerId('selected_location'),
-              position: LatLng(newPosition.latitude, newPosition.longitude),
-              infoWindow: InfoWindow(title: 'Selected Location'),
-            ),
-          };
-        });
-
-        // Update selected address and notify parent
-        setState(() {
-          _selectedAddress = addressString;
-          _currentPosition = newPosition;
-        });
-
-        // Notify parent widget
-        widget.onLocationSelected(newPosition, {
-          'street': '',
-          'city': selectedCity ?? '',
-          'state': selectedState ?? '',
-          'country': selectedCountry ?? '',
-          'postalCode': '',
-        });
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error getting location coordinates: $e')),
-      );
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  void _showMapScreen(Position position) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => Scaffold(
-          appBar: AppBar(
-            title: Text('Select Location'),
-          ),
-          body: Stack(
-            children: [
-              GoogleMap(
-                initialCameraPosition: CameraPosition(
-                  target: LatLng(position.latitude, position.longitude),
-                  zoom: 16,
-                ),
-                markers: _markers,
-                onMapCreated: (controller) => _mapController = controller,
-                myLocationEnabled: true,
-                myLocationButtonEnabled: true,
-                zoomControlsEnabled: true,
-                onTap: (latLng) {
-                  setState(() {
-                    _markers = {
-                      Marker(
-                        markerId: MarkerId('selected_location'),
-                        position: latLng,
-                        infoWindow: InfoWindow(title: 'Selected Location'),
-                      ),
-                    };
-                  });
-                },
-              ),
-              Positioned(
-                bottom: 30,
-                left: 20,
-                right: 20,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    padding: EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  onPressed: () async {
-                    if (_markers.isNotEmpty) {
-                      final marker = _markers.first;
-                      final newPosition = Position(
-                        latitude: marker.position.latitude,
-                        longitude: marker.position.longitude,
-                        timestamp: DateTime.now(),
-                        accuracy: 0,
-                        altitude: 0,
-                        heading: 0,
-                        speed: 0,
-                        speedAccuracy: 0,
-                        altitudeAccuracy: 0,
-                        headingAccuracy: 0,
-                      );
-                      await _getAddressFromPosition(newPosition);
-                      Navigator.pop(context);
-                    }
-                  },
-                  child: Text('Confirm Location'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _getAddressFromPosition(Position position) async {
-    try {
+      Position position = await Geolocator.getCurrentPosition();
       List<Placemark> placemarks = await placemarkFromCoordinates(
         position.latitude,
         position.longitude,
       );
 
       if (placemarks.isNotEmpty) {
-        Placemark place = placemarks.first;
+        Placemark place = placemarks[0];
+        String address = '${place.street}, ${place.locality}, ${place.country}';
         setState(() {
-          _selectedAddress =
-              '${place.street}, ${place.subLocality}, ${place.locality}, ${place.administrativeArea}, ${place.country}';
-          _currentPosition = position;
+          selectedAddress = address;
         });
 
-        widget.onLocationSelected(position, {
-          'street': place.street ?? '',
-          'city': place.locality ?? '',
-          'state': place.administrativeArea ?? '',
-          'country': place.country ?? '',
-          'postalCode': place.postalCode ?? '',
-        });
+        _showMapScreen(position);
       }
     } catch (e) {
-      print('Error getting address: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location: ${e.toString()}')),
+      );
+    } finally {
+      setState(() => isLoading = false);
     }
+  }
+
+  void _showMapScreen(Position position) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          appBar: AppBar(
+            title: Text('Confirm Location'),
+          ),
+          body: Stack(
+            children: [
+              GoogleMap(
+                initialCameraPosition: CameraPosition(
+                  target: LatLng(position.latitude, position.longitude),
+                  zoom: 15,
+                ),
+                markers: {
+                  Marker(
+                    markerId: MarkerId('current'),
+                    position: LatLng(position.latitude, position.longitude),
+                  ),
+                },
+              ),
+              Positioned(
+                bottom: 16,
+                left: 16,
+                right: 16,
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          selectedAddress ?? '',
+                          textAlign: TextAlign.center,
+                        ),
+                        SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: isSaving
+                                ? null
+                                : () async {
+                                    setState(() => isSaving = true);
+                                    await Future.delayed(Duration(seconds: 1));
+                                    widget.onLocationSelected(
+                                      selectedAddress!,
+                                      position.latitude,
+                                      position.longitude,
+                                    );
+                                    setState(() => isSaving = false);
+                                    Navigator.pop(context);
+                                  },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orange,
+                            ),
+                            child: isSaving
+                                ? SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                          Colors.white),
+                                    ),
+                                  )
+                                : Text('Confirm Location'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: EdgeInsets.symmetric(vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                'Location',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              Text(
-                ' *',
-                style: TextStyle(fontSize: 16, color: Colors.red),
-              ),
-            ],
-          ),
-          SizedBox(height: 8),
-          InkWell(
-            onTap: _showLocationPicker,
-            child: Container(
-              padding: EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.location_on),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _selectedAddress.isNotEmpty
-                          ? _selectedAddress
-                          : 'Select Location',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: isLoading ? null : _showLocationOptions,
+        style: ElevatedButton.styleFrom(
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          alignment: Alignment.centerLeft,
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.location_on),
+            SizedBox(width: 8),
+            if (isLoading)
+              SizedBox(
+                height: 16,
+                width: 16,
+                child: Center(
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.black,
                   ),
-                  if (_isLoading)
-                    SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  else if (_selectedAddress.isNotEmpty)
-                    TextButton(
-                      onPressed: _showLocationPicker,
-                      child: Text('Change'),
-                    ),
-                ],
+                ),
+              )
+            else
+              Expanded(
+                child: Text(
+                  selectedAddress ?? 'Select Location',
+                  style:
+                      TextStyle(color: Colors.black), // Set text color to black
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2,
+                ),
               ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
-  }
-}
-
-class LocationServices {
-  static Future<Position> getCurrentLocation() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      throw Exception('Location services are disabled.');
-    }
-
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        throw Exception('Location permissions are denied');
-      }
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      throw Exception('Location permissions are permanently denied');
-    }
-
-    return await Geolocator.getCurrentPosition();
-  }
-
-  // ... rest of your LocationServices code
-
-  static Future<LatLng> getCoordinatesFromAddress(String address) async {
-    List<Location> locations = await locationFromAddress(address);
-    return LatLng(locations.first.latitude, locations.first.longitude);
-  }
-
-  static Future<String> getAddressFromCoordinates(LatLng position) async {
-    List<Placemark> placemarks = await placemarkFromCoordinates(
-      position.latitude,
-      position.longitude,
-    );
-    Placemark place = placemarks[0];
-    return '${place.street}, ${place.locality}, ${place.administrativeArea}, ${place.country}';
-  }
-
-  static double calculateDistance(LatLng point1, LatLng point2) {
-    return Geolocator.distanceBetween(
-      point1.latitude,
-      point1.longitude,
-      point2.latitude,
-      point2.longitude,
-    );
-  }
-
-  // Add this new method to get address components
-  static Future<Map<String, String>> getAddressComponents(
-      LatLng position) async {
-    try {
-      List<Placemark> placemarks = await placemarkFromCoordinates(
-        position.latitude,
-        position.longitude,
-      );
-
-      Placemark place = placemarks[0];
-
-      return {
-        'street': place.street ?? '',
-        'city': place.locality ?? '',
-        'state': place.administrativeArea ?? '',
-        'country': place.country ?? '',
-        'postalCode': place.postalCode ?? '',
-      };
-    } catch (e) {
-      print('Error getting address components: $e');
-      return {
-        'street': '',
-        'city': '',
-        'state': '',
-        'country': '',
-        'postalCode': '',
-      };
-    }
   }
 }
 
@@ -1000,48 +872,236 @@ class ViewCounterService {
   }
 }
 
-class PermissionService {
-  static Future<bool> handleLocationPermission(BuildContext context) async {
-    bool serviceEnabled;
-    LocationPermission permission;
+class ImageGallery extends StatefulWidget {
+  final List<dynamic> images;
+  final double height;
+  final bool isEditable;
+  final Function(int)? onDelete;
+  final VoidCallback? onAddImages;
+  final bool showAddButton;
 
-    // Test if location services are enabled
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'Location services are disabled. Please enable the services'),
+  const ImageGallery({
+    Key? key,
+    required this.images,
+    this.height = 200,
+    this.isEditable = false,
+    this.onDelete,
+    this.onAddImages,
+    this.showAddButton = false,
+  }) : super(key: key);
+
+  @override
+  State<ImageGallery> createState() => _ImageGalleryState();
+}
+
+class _ImageGalleryState extends State<ImageGallery> {
+  final PageController _pageController = PageController();
+  int _currentPage = 1;
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: widget.height,
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Stack(
+        children: [
+          // Main Image Display
+          widget.images.isEmpty
+              ? Center(
+                  child: Text('No images available'),
+                )
+              : PageView.builder(
+                  controller: _pageController,
+                  onPageChanged: (int page) {
+                    setState(() {
+                      _currentPage = page + 1;
+                    });
+                  },
+                  itemCount: widget.images.length,
+                  itemBuilder: (context, index) {
+                    return Stack(
+                      children: [
+                        Container(
+                          margin: EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            image: DecorationImage(
+                              image: _getImageProvider(widget.images[index]),
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                        // Delete Button (only shown in editable mode)
+                        if (widget.isEditable && widget.onDelete != null)
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                              ),
+                              child: IconButton(
+                                icon: Icon(Icons.remove_circle),
+                                color: Colors.red,
+                                onPressed: () => widget.onDelete!(index),
+                              ),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+
+          // Dot Indicators - Only show when there's more than one image
+          if (widget.images.length > 1)
+            Positioned(
+              bottom: widget.showAddButton ? 48 : 16,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: SmoothPageIndicator(
+                  controller: _pageController,
+                  count: widget.images.length,
+                  effect: WormEffect(
+                    dotWidth: 8,
+                    dotHeight: 8,
+                    activeDotColor: Theme.of(context).primaryColor,
+                    dotColor: Colors.grey.shade400,
+                  ),
+                ),
+              ),
+            ),
+
+          // Image Counter - Only show when there are multiple images
+          if (widget.images.length > 1) // Changed condition here
+            Positioned(
+              top: 8,
+              left: 8,
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '$_currentPage/${widget.images.length}',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ),
+
+          // Add Images Button (only shown in editable mode)
+          if (widget.showAddButton && widget.onAddImages != null)
+            Positioned(
+              bottom: 8,
+              right: 8,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).primaryColor,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: IconButton(
+                  onPressed: widget.onAddImages,
+                  icon: Icon(
+                    Icons.add_photo_alternate,
+                    color: Colors.white,
+                  ),
+                  tooltip: 'Add More Images',
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  ImageProvider _getImageProvider(dynamic image) {
+    if (image is File) {
+      return FileImage(image);
+    } else if (image is String) {
+      return NetworkImage(image);
+    } else {
+      throw Exception('Unsupported image type');
+    }
+  }
+}
+
+// New PlanUpgradeScreen widget
+class PlanUpgradeScreen extends StatefulWidget {
+  final Function(bool isPremium) onPlanChanged;
+
+  const PlanUpgradeScreen({Key? key, required this.onPlanChanged})
+      : super(key: key);
+
+  @override
+  _PlanUpgradeScreenState createState() => _PlanUpgradeScreenState();
+}
+
+class _PlanUpgradeScreenState extends State<PlanUpgradeScreen> {
+  bool _isPremiumEnabled = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Upgrade Plan'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Premium Plan Features',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: Icon(Icons.star, color: Colors.orange),
+                      title: Text('Unlimited Featured Listings'),
+                    ),
+                    ListTile(
+                      leading: Icon(Icons.visibility, color: Colors.orange),
+                      title: Text('Priority in Search Results'),
+                    ),
+                    ListTile(
+                      leading: Icon(Icons.analytics, color: Colors.orange),
+                      title: Text('Advanced Analytics'),
+                    ),
+                    SwitchListTile(
+                      title: Text('Enable Premium Plan'),
+                      subtitle: Text('Toggle for testing purposes'),
+                      value: _isPremiumEnabled,
+                      onChanged: (value) {
+                        setState(() => _isPremiumEnabled = value);
+                        widget.onPlanChanged(value);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
-      );
-      return false;
-    }
-
-    // Check location permission
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Location permissions are denied'),
-          ),
-        );
-        return false;
-      }
-    }
-
-    // Check if permission is permanently denied
-    if (permission == LocationPermission.deniedForever) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'Location permissions are permanently denied, we cannot request permissions.'),
-        ),
-      );
-      return false;
-    }
-
-    return true;
+      ),
+    );
   }
 }

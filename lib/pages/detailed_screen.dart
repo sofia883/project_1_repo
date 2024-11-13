@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
 import 'package:project_1/main.dart';
 import 'chat_page.dart';
+import 'package:project_1/services/utils.dart';
 
 class DetailedResultScreen extends StatefulWidget {
   final QueryDocumentSnapshot selectedDoc;
@@ -214,11 +215,11 @@ class _DetailedResultScreenState extends State<DetailedResultScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ImageSlider(
-            isMainItem: true,
-            items: images,
-            height: isMainItem ? 300 : 150,
-          ),
+            ImageGallery(
+          images: images,
+          height: isMainItem ? 300 : 150,
+          isEditable: false,
+        ),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
