@@ -155,23 +155,30 @@ class _ItemWizardState extends State<ItemWizard> {
           validator: (value) => value?.isEmpty ?? true ? 'Required' : null,
         ),
         const SizedBox(height: 16),
-        DropdownButtonFormField<String>(
-          value: _selectedCategory,
-          decoration: InputDecoration(
-            labelText: 'Category',
-            border: OutlineInputBorder(),
-            prefixIcon: Icon(Icons.category),
-          ),
-          items: Utils.categories.map((category) {
-            return DropdownMenuItem(
-              value: category,
-              child: Text(category),
-            );
-          }).toList(),
-          onChanged: (value) {
-            setState(() => _selectedCategory = value!);
-          },
-        ),
+       DropdownButtonFormField<String>(
+  value: _selectedCategory,
+  decoration: InputDecoration(
+    labelText: 'Category',
+    border: OutlineInputBorder(),
+    prefixIcon: Icon(Icons.category),
+  ),
+  items: Utils.categories.map((category) {
+    return DropdownMenuItem(
+      value: category.name, // Use the name of the category as the value
+      child: Row(
+        children: [
+          Icon(category.icon), // Display the icon
+          const SizedBox(width: 8),
+          Text(category.name), // Display the name
+        ],
+      ),
+    );
+  }).toList(),
+  onChanged: (value) {
+    setState(() => _selectedCategory = value!);
+  },
+),
+
       ],
     );
   }
@@ -789,5 +796,4 @@ class _ItemWizardState extends State<ItemWizard> {
     });
   }
 
-  // Add your existing helper methods here (_takePicture, _pickImages, _submitItem, etc.)
 }

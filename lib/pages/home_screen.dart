@@ -18,54 +18,16 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
   late FilterService _filterService;
-  bool _isLoadingStateFilter = true;
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
     _filterService = FilterService();
-    _loadAds();
+    // Initialize with "All" category
+    _updateCategory('All');
   }
-
-  // Ads related properties
-  List<Map<String, dynamic>> _ads = [];
-
-  // Widget _buildFilteredItemsGrid() {
-  //   return FutureBuilder<QuerySnapshot>(
-  //     // First check if the category has any items
-  //     future: _filterService.getFilteredQuery().get(),
-  //     builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
-  //       // Show loading indicator while checking
-  //       if (_isLoading) {
-  //         return Center(
-  //           child: CircularProgressIndicator(
-  //             valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
-  //           ),
-  //         );
-  //       }
-
-  //       // If we have data, stream the results
-  //       if (snapshot.hasData) {
-  //         return StreamBuilder<QuerySnapshot>(
-  //           stream: _filterService.getFilteredQuery().snapshots(),
-  //           builder: (context, streamSnapshot) {
-  //             if (!streamSnapshot.hasData ||
-  //                 streamSnapshot.data!.docs.isEmpty) {
-  //               return _buildEmptyState();
-  //             }
-  //             return _buildGridContent(streamSnapshot.data!.docs);
-  //           },
-  //         );
-  //       }
-
-  //       // If we don't have data yet, show empty state
-  //       return _buildEmptyState();
-  //     },
-  //   );
-  // }
 
   Widget _buildEmptyState() {
     return Center(
@@ -92,7 +54,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return StreamBuilder<QuerySnapshot>(
       stream: _filterService.getFilteredQuery().snapshots(),
       builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
-        // Show loading indicator while data is being fetched
+        // Show loading indicator only when explicitly loading
         if (_isLoading) {
           return Center(
             child: CircularProgressIndicator(
@@ -101,14 +63,14 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         }
 
-        // Check for errors
+        // Check if there was an error
         if (snapshot.hasError) {
           return Center(
             child: Text('Something went wrong'),
           );
         }
 
-        // Show loading indicator while waiting for data
+        // Show loading indicator only during initial data fetch
         if (!snapshot.hasData) {
           return Center(
             child: CircularProgressIndicator(
@@ -117,39 +79,15 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         }
 
-        // If we have data but it's empty, show empty state
+        // If no data available, show an empty state
         if (snapshot.data!.docs.isEmpty) {
           return _buildEmptyState();
         }
 
-        // If we have data, show the grid
+        // Display the grid of items once data is available
         return _buildGridContent(snapshot.data!.docs);
       },
     );
-  }
-
-// Updated category update method
-  Future<void> _updateCategory(String category) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      // Update category in filter service
-      _filterService.selectedCategory = category == 'All' ? null : category;
-
-      // Reset other filters but keep the category
-      _filterService.resetAllFiltersExceptCategory();
-
-      // Add a small delay to ensure loading indicator is shown
-      await Future.delayed(Duration(milliseconds: 300));
-    } catch (e) {
-      print('Error updating category: $e');
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
   }
 
   Widget _buildGridContent(List<QueryDocumentSnapshot> items) {
@@ -258,20 +196,42 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildCategoryBar() {
+    // Take the first 3 categories
     final displayCategories = Utils.categories.take(3).toList();
 
+    // If selectedCategory is not 'All' and is not in the first 3 categories, insert it at second position
+    String currentCategory = _filterService.selectedCategory ?? 'All';
+
+    if (currentCategory != 'All' &&
+        !displayCategories.any((cat) => cat.name == currentCategory)) {
+      // Insert the selected category in the second position
+      displayCategories.insert(
+          1, Utils.categories.firstWhere((cat) => cat.name == currentCategory));
+    }
+
     return Container(
-      padding: EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
       height: 60,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        itemCount: 4,
-        separatorBuilder: (context, index) => SizedBox(width: 12),
+        itemCount: 4, // 3 categories + "See More"
+        separatorBuilder: (context, index) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
+          // "See More" Button
           if (index == 3) {
-            return PopupMenuButton<String>(
+            return GestureDetector(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => CategorySelectionScreen(
+                      onCategorySelected: _updateCategory,
+                    ),
+                  ),
+                );
+              },
               child: Container(
-                padding: EdgeInsets.symmetric(vertical: 8, horizontal: 20),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 8, horizontal: 20),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
@@ -279,7 +239,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
-                  children: [
+                  children: const [
                     Text(
                       'See More',
                       style: TextStyle(
@@ -292,42 +252,43 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-              onSelected: (category) async {
-                await _updateCategory(category);
-              },
-              itemBuilder: (BuildContext context) {
-                return Utils.categories.skip(3).map((String category) {
-                  return PopupMenuItem<String>(
-                    value: category,
-                    child: Text(category),
-                  );
-                }).toList();
-              },
             );
           }
 
-          String category = displayCategories[index];
-          bool isSelected = _filterService.selectedCategory == category ||
-              (category == 'All' && _filterService.selectedCategory == null);
+          // Display categories
+          final category = displayCategories[index];
+          final isSelected = currentCategory == category.name;
 
           return GestureDetector(
-            onTap: () => _updateCategory(category),
+            onTap: () => _updateCategory(category.name),
             child: Container(
-              padding: EdgeInsets.symmetric(vertical: 8, horizontal: 20),
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 20),
               decoration: BoxDecoration(
                 color: isSelected ? Colors.orange : Colors.white,
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: Colors.orange),
               ),
-              child: Center(
-                child: Text(
-                  category,
-                  style: TextStyle(
-                    color: isSelected ? Colors.white : Colors.orange,
-                    fontWeight:
-                        isSelected ? FontWeight.bold : FontWeight.normal,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isSelected && category.name != 'All')
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Icon(
+                        category.icon,
+                        color: isSelected ? Colors.white : Colors.orange,
+                        size: 16,
+                      ),
+                    ),
+                  Text(
+                    category.name,
+                    style: TextStyle(
+                      color: isSelected ? Colors.white : Colors.orange,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
           );
@@ -336,20 +297,26 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _loadAds() async {
-    try {
-      final adsSnapshot = await FirebaseFirestore.instance
-          .collection('ads')
-          .orderBy('createdAt', descending: true)
-          .get();
+  Future<void> _updateCategory(String category) async {
+    if (category == _filterService.selectedCategory)
+      return; // Don't update if same category
 
-      setState(() {
-        _ads = adsSnapshot.docs
-            .map((doc) => doc.data() as Map<String, dynamic>)
-            .toList();
-      });
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      _filterService.selectedCategory = category == 'All' ? null : category;
+      _filterService.resetAllFiltersExceptCategory();
+      await Future.delayed(Duration(milliseconds: 300));
     } catch (e) {
-      print('Error loading ads: $e');
+      print('Error updating category: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -377,203 +344,52 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-        appBar: AppBar(
-          title: Text('Marketplace'),
-          backgroundColor: Colors.white,
-          elevation: 0,
-          actions: [
-            IconButton(
-              icon: Icon(Icons.search, color: Colors.black),
-              onPressed: () {
-                showSearch(context: context, delegate: ProductSearchDelegate());
-              },
+      appBar: AppBar(
+        title: Text('Marketplace'),
+        backgroundColor: Colors.orange,
+        actions: [
+          IconButton(
+            icon: Icon(Icons.search, color: Colors.black),
+            onPressed: () {
+              showSearch(context: context, delegate: ProductSearchDelegate());
+            },
+          ),
+          IconButton(
+            icon: Icon(Icons.add_business, color: Colors.black),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => AddAdvertisementScreen()),
             ),
-            IconButton(
-              icon: Icon(Icons.add_business, color: Colors.black),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => AddAdvertisementScreen()),
-              ),
+          ),
+          IconButton(
+            icon: Icon(Icons.filter_list, color: Colors.black),
+            onPressed: () => _filterService.showFilterDialog(context),
+          ),
+          IconButton(
+            icon: Icon(Icons.person, color: Colors.black),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => ProfileScreen()),
             ),
-            IconButton(
-              icon: Icon(Icons.filter_list, color: Colors.black),
-              onPressed: () => _showFilterDialog(context),
-            ),
-            IconButton(
-              icon: Icon(Icons.person, color: Colors.black),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => ProfileScreen()),
-              ),
-            ),
-            IconButton(
-              icon: Icon(Icons.add, color: Colors.black),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => ItemWizard()),
-              ).then((_) => setState(() {})),
-            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.add, color: Colors.black),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => ItemWizard()),
+            ).then((_) => setState(() {})),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildCategoryBar(),
+            Expanded(child: _buildFilteredItemsGrid()),
           ],
         ),
-        backgroundColor: Colors.grey[100],
-        body: RefreshIndicator(
-          onRefresh: () async {
-            setState(() {
-              _isLoading = true;
-            });
-            await _loadAds();
-            setState(() {
-              _isLoading = false;
-            });
-          },
-          child: CustomScrollView(
-              physics:
-                  AlwaysScrollableScrollPhysics(), // This ensures pull-to-refresh works even when content doesn't fill the screen
-              slivers: [
-                SliverToBoxAdapter(
-                  child: Column(
-                    children: [
-                      _buildCategoryBar(),
-                      _buildFeaturedItemsSection(), //
-                      if (_ads.isNotEmpty) _buildAdsCarousel(),
-                    ],
-                  ),
-                ),
-                SliverFillRemaining(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: _buildFilteredItemsGrid(),
-                  ),
-                )
-              ]),
-        ));
-  }
-
-  Widget _buildAdsCarousel() {
-    return Container(
-      height: 200,
-      child: PageView.builder(
-        itemCount: _ads.length,
-        itemBuilder: (context, index) {
-          return Card(
-            margin: EdgeInsets.all(8),
-            child: Stack(
-              children: [
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: Container(
-                    padding: EdgeInsets.all(8),
-                    color: Colors.black54,
-                    child: ImageSlider(
-                      items: _ads, // Your ads list from Firebase
-                      height: 200,
-                      autoSlide: true,
-                      isAd: true,
-                      autoSlideDuration: Duration(seconds: 3),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
       ),
     );
-  }
-
-// Add this to HomeScreen for featured items display
-  Widget _buildFeaturedItemsSection() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FeaturedService.getFeaturedItems(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return SizedBox.shrink();
-
-        final featuredItems = snapshot.data!.docs;
-        if (featuredItems.isEmpty) return SizedBox.shrink();
-
-        return Container(
-          height: 200,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  'Featured Items',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: featuredItems.length,
-                  itemBuilder: (context, index) {
-                    final featuredItem =
-                        featuredItems[index].data() as Map<String, dynamic>;
-                    return FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance
-                          .collection('items')
-                          .doc(featuredItem['itemId'])
-                          .get(),
-                      builder: (context, itemSnapshot) {
-                        if (!itemSnapshot.hasData) return SizedBox.shrink();
-
-                        final item =
-                            itemSnapshot.data!.data() as Map<String, dynamic>;
-                        return Container(
-                          width: 200,
-                          margin: EdgeInsets.symmetric(horizontal: 8),
-                          child: Card(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  height: 120,
-                                  decoration: BoxDecoration(
-                                    image: DecorationImage(
-                                      image: NetworkImage(item['images'][0]),
-                                      fit: BoxFit.cover,
-                                    ),
-                                  ),
-                                ),
-                                Padding(
-                                  padding: EdgeInsets.all(8),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        item['name'],
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      ),
-                                      Text('\$${item['price']}'),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _showFilterDialog(BuildContext context) async {
-    await _filterService.showFilterDialog(context);
-    setState(() {});
   }
 }

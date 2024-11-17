@@ -14,29 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'dart:io';
 
-class Utils {
-  static final List<String> categories = [
-    'All',
-    'Cars',
-    'Electronics',
-    'Fashion',
-    'Home',
-    'Furniture',
-    'Books',
-    'Toys',
-    'Sports',
-    'Beauty',
-    'Health',
-    'Automotive',
-    'Jewelry',
-    'Groceries',
-    'Music',
-    'Pet Supplies',
-    'Garden',
-    'Office Supplies',
-    'Baby Products',
-  ];
-}
+
 
 class FilterService {
   final _loadingController = StreamController<bool>.broadcast();
@@ -97,6 +75,7 @@ class FilterService {
   }
 
   Query getFilteredQuery() {
+    // Start with the base collection
     Query query = FirebaseFirestore.instance.collection('items');
 
     // Apply category filter
@@ -104,14 +83,14 @@ class FilterService {
       query = query.where('category', isEqualTo: selectedCategory);
     }
 
-    // Apply price filter
-    if (isPriceFilterActive) {
+    // Apply price filter (ensure price range is valid)
+    if (isPriceFilterActive && priceRange != null) {
       query = query
           .where('price', isGreaterThanOrEqualTo: priceRange.start)
           .where('price', isLessThanOrEqualTo: priceRange.end);
     }
 
-    // Apply location filters
+    // Apply location filters (check for valid selections)
     if (selectedCountry != null) {
       query = query.where('address.country', isEqualTo: selectedCountry);
     }
@@ -126,14 +105,19 @@ class FilterService {
     if (selectedTimeFrame != null) {
       DateTime cutoffDate;
       if (selectedTimeFrame == 'Older') {
-        cutoffDate = DateTime.now().subtract(Duration(days: 365));
+        cutoffDate =
+            DateTime.now().subtract(Duration(days: 365)); // 1 year back
         query = query.where('createdAt', isLessThan: cutoffDate);
       } else {
-        cutoffDate = DateTime.now().subtract(timeFrames[selectedTimeFrame]!);
-        query = query.where('createdAt', isGreaterThan: cutoffDate);
+        // Handle time frames such as "Last Week", "Last Month", etc.
+        if (timeFrames.containsKey(selectedTimeFrame)) {
+          cutoffDate = DateTime.now().subtract(timeFrames[selectedTimeFrame]!);
+          query = query.where('createdAt', isGreaterThan: cutoffDate);
+        }
       }
     }
 
+    // Return the constructed query
     return query;
   }
 
@@ -999,6 +983,127 @@ class _PlanUpgradeScreenState extends State<PlanUpgradeScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+class CategoryModel {
+  final String name;
+  final IconData icon;
+
+  CategoryModel(this.name, this.icon);
+}
+
+class Utils {
+  static final List<CategoryModel> categories = [
+    CategoryModel('All', Icons.apps),
+    CategoryModel('Cars', Icons.directions_car),
+    CategoryModel('Home', Icons.home),
+    CategoryModel('Electronics', Icons.devices),
+    CategoryModel('Fashion', Icons.shopping_bag),
+    CategoryModel('Furniture', Icons.chair),
+    CategoryModel('Books', Icons.book),
+    CategoryModel('Toys', Icons.toys),
+    CategoryModel('Sports', Icons.sports_basketball),
+    CategoryModel('Beauty', Icons.face),
+    CategoryModel('Health', Icons.favorite),
+    CategoryModel('Automotive', Icons.car_repair),
+    CategoryModel('Jewelry', Icons.diamond),
+    CategoryModel('Groceries', Icons.shopping_cart),
+    CategoryModel('Music', Icons.music_note),
+    CategoryModel('Pet Supplies', Icons.pets),
+    CategoryModel('Garden', Icons.grass),
+    CategoryModel('Office Supplies', Icons.business_center),
+    CategoryModel('Baby Products', Icons.child_care),
+  ];
+}
+
+class CategorySelectionScreen extends StatelessWidget {
+  final Function(String) onCategorySelected;
+
+  const CategorySelectionScreen({Key? key, required this.onCategorySelected}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Categories',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: Colors.orange,
+        elevation: 0,
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.orange.shade300,
+              Colors.orange.shade50,
+            ],
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: GridView.builder(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 16,
+              mainAxisSpacing: 16,
+              childAspectRatio: 1.1,
+            ),
+            itemCount: Utils.categories.length,
+            itemBuilder: (context, index) {
+              CategoryModel category = Utils.categories[index];
+              return _buildCategoryCard(context, category);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCategoryCard(BuildContext context, CategoryModel category) {
+    return Material(
+      elevation: 4,
+      borderRadius: BorderRadius.circular(15),
+      child: InkWell(
+        onTap: () {
+          onCategorySelected(category.name);
+          Navigator.pop(context);
+        },
+        borderRadius: BorderRadius.circular(15),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(15),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                category.icon,
+                size: 40,
+                color: Colors.orange,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                category.name,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
         ),
       ),
     );
