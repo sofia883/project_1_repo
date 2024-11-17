@@ -33,6 +33,309 @@ class _HomeScreenState extends State<HomeScreen> {
   // Ads related properties
   List<Map<String, dynamic>> _ads = [];
 
+  // Widget _buildFilteredItemsGrid() {
+  //   return FutureBuilder<QuerySnapshot>(
+  //     // First check if the category has any items
+  //     future: _filterService.getFilteredQuery().get(),
+  //     builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
+  //       // Show loading indicator while checking
+  //       if (_isLoading) {
+  //         return Center(
+  //           child: CircularProgressIndicator(
+  //             valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+  //           ),
+  //         );
+  //       }
+
+  //       // If we have data, stream the results
+  //       if (snapshot.hasData) {
+  //         return StreamBuilder<QuerySnapshot>(
+  //           stream: _filterService.getFilteredQuery().snapshots(),
+  //           builder: (context, streamSnapshot) {
+  //             if (!streamSnapshot.hasData ||
+  //                 streamSnapshot.data!.docs.isEmpty) {
+  //               return _buildEmptyState();
+  //             }
+  //             return _buildGridContent(streamSnapshot.data!.docs);
+  //           },
+  //         );
+  //       }
+
+  //       // If we don't have data yet, show empty state
+  //       return _buildEmptyState();
+  //     },
+  //   );
+  // }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.search_off, size: 64, color: Colors.grey),
+          SizedBox(height: 16),
+          Text(
+            _filterService.selectedCategory != null
+                ? 'No items found in ${_filterService.selectedCategory} category'
+                : 'No items found',
+            style: TextStyle(
+              fontSize: 16,
+              color: Colors.grey[600],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilteredItemsGrid() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _filterService.getFilteredQuery().snapshots(),
+      builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
+        // Show loading indicator while data is being fetched
+        if (_isLoading) {
+          return Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+            ),
+          );
+        }
+
+        // Check for errors
+        if (snapshot.hasError) {
+          return Center(
+            child: Text('Something went wrong'),
+          );
+        }
+
+        // Show loading indicator while waiting for data
+        if (!snapshot.hasData) {
+          return Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+            ),
+          );
+        }
+
+        // If we have data but it's empty, show empty state
+        if (snapshot.data!.docs.isEmpty) {
+          return _buildEmptyState();
+        }
+
+        // If we have data, show the grid
+        return _buildGridContent(snapshot.data!.docs);
+      },
+    );
+  }
+
+// Updated category update method
+  Future<void> _updateCategory(String category) async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Update category in filter service
+      _filterService.selectedCategory = category == 'All' ? null : category;
+
+      // Reset other filters but keep the category
+      _filterService.resetAllFiltersExceptCategory();
+
+      // Add a small delay to ensure loading indicator is shown
+      await Future.delayed(Duration(milliseconds: 300));
+    } catch (e) {
+      print('Error updating category: $e');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Widget _buildGridContent(List<QueryDocumentSnapshot> items) {
+    return GridView.builder(
+      padding: EdgeInsets.symmetric(vertical: 16),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+        childAspectRatio: 0.75,
+      ),
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final doc = items[index];
+        final item = doc.data() as Map<String, dynamic>;
+        final images = List<String>.from(item['images'] ?? []);
+        final timestamp = item['createdAt'] as Timestamp?;
+        final formattedDate = timestamp != null
+            ? '${timestamp.toDate().day}/${timestamp.toDate().month}/${timestamp.toDate().year}'
+            : 'No date';
+
+        return GestureDetector(
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => DetailedResultScreen(
+                  selectedDoc: doc,
+                  allDocs: items,
+                ),
+              ),
+            );
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.5),
+                  spreadRadius: 2,
+                  blurRadius: 5,
+                  offset: Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius:
+                          BorderRadius.vertical(top: Radius.circular(10)),
+                      image: DecorationImage(
+                        image: NetworkImage(images.isNotEmpty
+                            ? images[0]
+                            : 'https://via.placeholder.com/150'),
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item['name'] ?? 'No Title',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      SizedBox(height: 4),
+                      IconButton(
+                          onPressed: () => _deleteItem(doc.id),
+                          icon: Icon(Icons.delete)),
+                      Text(
+                        "\$${item['price']?.toString() ?? 'N/A'}",
+                        style: TextStyle(
+                          color: Colors.orange,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        formattedDate,
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCategoryBar() {
+    final displayCategories = Utils.categories.take(3).toList();
+
+    return Container(
+      padding: EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+      height: 60,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: 4,
+        separatorBuilder: (context, index) => SizedBox(width: 12),
+        itemBuilder: (context, index) {
+          if (index == 3) {
+            return PopupMenuButton<String>(
+              child: Container(
+                padding: EdgeInsets.symmetric(vertical: 8, horizontal: 20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.blue),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'See More',
+                      style: TextStyle(
+                        color: Colors.blue,
+                        fontWeight: FontWeight.normal,
+                      ),
+                    ),
+                    SizedBox(width: 4),
+                    Icon(Icons.arrow_drop_down, color: Colors.blue, size: 20),
+                  ],
+                ),
+              ),
+              onSelected: (category) async {
+                await _updateCategory(category);
+              },
+              itemBuilder: (BuildContext context) {
+                return Utils.categories.skip(3).map((String category) {
+                  return PopupMenuItem<String>(
+                    value: category,
+                    child: Text(category),
+                  );
+                }).toList();
+              },
+            );
+          }
+
+          String category = displayCategories[index];
+          bool isSelected = _filterService.selectedCategory == category ||
+              (category == 'All' && _filterService.selectedCategory == null);
+
+          return GestureDetector(
+            onTap: () => _updateCategory(category),
+            child: Container(
+              padding: EdgeInsets.symmetric(vertical: 8, horizontal: 20),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.orange : Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.orange),
+              ),
+              child: Center(
+                child: Text(
+                  category,
+                  style: TextStyle(
+                    color: isSelected ? Colors.white : Colors.orange,
+                    fontWeight:
+                        isSelected ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _loadAds() async {
     try {
       final adsSnapshot = await FirebaseFirestore.instance
@@ -180,123 +483,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildFilteredItemsGrid() {
-    return FutureBuilder(
-      future: Future.delayed(
-          Duration(milliseconds: 500)), // Reduced delay for better UX
-      builder: (context, snapshot) {
-        return StreamBuilder<QuerySnapshot>(
-          stream: _filterService.getFilteredQuery().snapshots(),
-          builder: (context, itemSnapshot) {
-            // Handle error state
-            if (itemSnapshot.hasError) {
-              return _filterService.buildEmptyState();
-            }
-
-            // During refresh, show loading indicator overlay while keeping previous content visible
-            if (_isLoading &&
-                itemSnapshot.connectionState == ConnectionState.waiting) {
-              return Stack(
-                children: [
-                  // Show previous content (if any)
-                  if (itemSnapshot.hasData &&
-                      itemSnapshot.data!.docs.isNotEmpty)
-                    _buildGridContent(itemSnapshot.data!.docs),
-
-                  // Show loading overlay
-                  Container(
-                    color: Colors.white.withOpacity(0.5),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircularProgressIndicator(
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.orange),
-                          ),
-                          SizedBox(height: 16),
-                          Text(
-                            'Refreshing...',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 16,
-                            ),
-                          )
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            }
-
-            // Initial loading state (when no previous data exists)
-            if (!itemSnapshot.hasData && _isLoading) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
-                    ),
-                    SizedBox(height: 16),
-                    Text(
-                      'Loading items...',
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 16,
-                      ),
-                    )
-                  ],
-                ),
-              );
-            }
-
-            // Handle case where data is null or empty
-            final data = itemSnapshot.data;
-            if (data == null || data.docs.isEmpty) {
-              return _filterService.buildEmptyState();
-            }
-
-            // Update loading state flag
-            if (_isLoadingStateFilter == false) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                setState(() {
-                  _isLoadingStateFilter = true;
-                });
-              });
-            }
-
-            // Sort the documents to show featured items first, then non-featured sorted by createdAt
-            final sortedDocs = List<QueryDocumentSnapshot>.from(data.docs)
-              ..sort((a, b) {
-                final aIsFeatured =
-                    (a.data() as Map<String, dynamic>)['isFeatured'] ?? false;
-                final bIsFeatured =
-                    (b.data() as Map<String, dynamic>)['isFeatured'] ?? false;
-
-                if (aIsFeatured && !bIsFeatured) {
-                  return -1; // a comes before b
-                } else if (!aIsFeatured && bIsFeatured) {
-                  return 1; // b comes before a
-                } else {
-                  // For non-featured items, sort by createdAt in descending order
-                  final aCreatedAt = (a.data()
-                      as Map<String, dynamic>)['createdAt'] as Timestamp;
-                  final bCreatedAt = (b.data()
-                      as Map<String, dynamic>)['createdAt'] as Timestamp;
-                  return bCreatedAt.compareTo(aCreatedAt);
-                }
-              });
-
-            // Build grid with the sorted data
-            return _buildGridContent(sortedDocs);
-          },
-        );
-      },
-    );
-  }
-
 // Add this to HomeScreen for featured items display
   Widget _buildFeaturedItemsSection() {
     return StreamBuilder<QuerySnapshot>(
@@ -386,218 +572,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildGridContent(List<QueryDocumentSnapshot> items) {
-    return GridView.builder(
-      padding: EdgeInsets.symmetric(vertical: 16),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 16,
-        childAspectRatio: 0.75,
-      ),
-      itemCount: items.length,
-      itemBuilder: (context, index) {
-        final doc = items[index];
-        final item = doc.data() as Map<String, dynamic>;
-        final images = List<String>.from(item['images'] ?? []);
-        final timestamp = item['createdAt'] as Timestamp?;
-        final formattedDate = timestamp != null
-            ? '${timestamp.toDate().day}/${timestamp.toDate().month}/${timestamp.toDate().year}'
-            : 'No date';
-
-        return GestureDetector(
-          onTap: () {
-            // Fixed navigation to DetailedResultScreen
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => DetailedResultScreen(
-                  selectedDoc: doc,
-                  allDocs: items,
-                ),
-              ),
-            );
-          },
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.5),
-                  spreadRadius: 2,
-                  blurRadius: 5,
-                  offset: Offset(0, 3),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius:
-                          BorderRadius.vertical(top: Radius.circular(10)),
-                      image: DecorationImage(
-                        image: NetworkImage(images.isNotEmpty
-                            ? images[0]
-                            : 'https://via.placeholder.com/150'),
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item['name'] ?? 'No Title',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      SizedBox(height: 4),
-                      // In the IconButton widget, change this line:
-                      IconButton(
-                          onPressed: () =>
-                              _deleteItem(doc.id), // Pass the document ID here
-                          icon: Icon(Icons.delete)),
-                      Text(
-                        "\$${item['price']?.toString() ?? 'N/A'}",
-                        style: TextStyle(
-                          color: Colors.orange,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        formattedDate,
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  void _updateCategory(String category) async {
-    setState(() {
-      _isLoading = true; // Set loading state to true when user taps a category
-    });
-
-    // Update the category
-    _filterService.selectedCategory = category == 'All' ? null : category;
-    _filterService.resetAllFilters();
-
-    // Simulate a small delay or do any async filtering tasks
-
-    // Artificial delay of 1 second
-  }
-
-  Widget _buildCategoryBar() {
-    // Show first 3 categories only
-    final displayCategories = Utils.categories.take(3).toList();
-
-    return Container(
-      padding: EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-      height: 60,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: 4, // Show 4 items total (3 categories + See More)
-        separatorBuilder: (context, index) => SizedBox(width: 12),
-        itemBuilder: (context, index) {
-          // If it's the last item (index 3), show the See More button
-          if (index == 3) {
-            return PopupMenuButton<String>(
-              child: Container(
-                padding: EdgeInsets.symmetric(vertical: 8, horizontal: 20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border:
-                      Border.all(color: Colors.blue), // Change border to blue
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'See More',
-                      style: TextStyle(
-                        color: Colors.blue, // Change text color to blue
-                        fontWeight: FontWeight.normal,
-                      ),
-                    ),
-                    SizedBox(width: 4),
-                    Icon(
-                      Icons.arrow_drop_down,
-                      color: Colors.blue, // Change icon color to blue
-                      size: 20,
-                    ),
-                  ],
-                ),
-              ),
-              onSelected: _updateCategory,
-              itemBuilder: (BuildContext context) {
-                return Utils.categories
-                    .skip(
-                        3) // Skip the first 3 categories that are already shown
-                    .map((String category) {
-                  return PopupMenuItem<String>(
-                    value: category,
-                    child: Text(category),
-                  );
-                }).toList();
-              },
-            );
-          }
-
-          // For the first 3 items, show categories
-          String category = displayCategories[index];
-          bool isSelected = _filterService.selectedCategory == category ||
-              (category == 'All' && _filterService.selectedCategory == null);
-
-          return GestureDetector(
-            onTap: () => _updateCategory(category),
-            child: Container(
-              padding: EdgeInsets.symmetric(vertical: 8, horizontal: 20),
-              decoration: BoxDecoration(
-                color: isSelected ? Colors.orange : Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.orange),
-              ),
-              child: Center(
-                child: Text(
-                  category,
-                  style: TextStyle(
-                    color: isSelected ? Colors.white : Colors.orange,
-                    fontWeight:
-                        isSelected ? FontWeight.bold : FontWeight.normal,
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
   void _showFilterDialog(BuildContext context) async {
-    await _filterService.showFilterBottomSheet(context);
+    await _filterService.showFilterDialog(context);
     setState(() {});
   }
 }

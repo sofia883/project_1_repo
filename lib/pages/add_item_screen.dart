@@ -734,7 +734,7 @@ class _ItemWizardState extends State<ItemWizard> {
             print('Selected address: $address');
             print('Latitude: $lat, Longitude: $lng');
           },
-        ),
+        )
       ],
     );
   }

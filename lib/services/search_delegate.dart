@@ -439,8 +439,6 @@ class ProductSearchDelegate extends SearchDelegate {
                               query = '';
                               showSuggestions(context);
                             }
-
-                            
                           },
                         ),
                       ],

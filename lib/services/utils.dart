@@ -8,7 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:project_1/pages/detailed_screen.dart';
-
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter/material.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
@@ -57,7 +57,6 @@ class FilterService {
   String? selectedTimeFrame;
   bool isLoading = false;
   Position? currentPosition;
-
   static const Map<String, Duration> timeFrames = {
     'Last 24 Hours': Duration(hours: 24),
     'This Week': Duration(days: 7),
@@ -71,201 +70,30 @@ class FilterService {
     _loadingController.close();
   }
 
-  void reset() {
+  // Modified reset method to have an optional preserveCategory parameter
+  void reset({bool preserveCategory = false}) {
+    String? tempCategory = preserveCategory ? selectedCategory : null;
+
+    // Reset all filters
     priceRange = const RangeValues(0, 1000);
     isPriceFilterActive = false;
     selectedCountry = null;
     selectedState = null;
     selectedCity = null;
-    currentPosition = null;
-  }
-
-  void resetAllFilters() {
-    priceRange = const RangeValues(0, 1000);
-    isPriceFilterActive = false;
-    selectedCity = null;
-    selectedCountry = null;
     selectedTimeFrame = null;
-    _loadingController.add(false);
-  }
+    currentPosition = null;
 
-  Future<void> _getCurrentLocation(BuildContext context) async {
-    try {
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          throw Exception('Location permission denied');
-        }
-      }
-
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-
-      List<Placemark> placemarks = await placemarkFromCoordinates(
-        position.latitude,
-        position.longitude,
-      );
-
-      if (placemarks.isNotEmpty) {
-        Placemark place = placemarks.first;
-        selectedCity = place.locality;
-        selectedState = place.administrativeArea;
-        selectedCountry = place.country;
-        currentPosition = position;
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error getting location: $e')),
-      );
+    // Restore category if preserveCategory is true
+    if (preserveCategory) {
+      selectedCategory = tempCategory;
+    } else {
+      selectedCategory = null;
     }
   }
 
-  Future<void> showFilterBottomSheet(BuildContext context) async {
-    RangeValues tempPriceRange = priceRange;
-    bool tempIsPriceFilterActive = isPriceFilterActive;
-    String? tempCountry = selectedCountry;
-    String? tempState = selectedState;
-    String? tempCity = selectedCity;
-    String? tempTimeFrame = selectedTimeFrame;
-    String? tempFormattedAddress;
-
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return DraggableScrollableSheet(
-              initialChildSize: 0.9,
-              minChildSize: 0.5,
-              maxChildSize: 0.95,
-              expand: false,
-              builder: (context, scrollController) {
-                return SingleChildScrollView(
-                  controller: scrollController,
-                  child: Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Filter Options',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            IconButton(
-                              icon: Icon(Icons.close),
-                              onPressed: () => Navigator.pop(context),
-                            ),
-                          ],
-                        ),
-                        SizedBox(height: 20),
-                        Text('Price Range',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
-                        RangeSlider(
-                          values: tempPriceRange,
-                          min: 0,
-                          max: 1000,
-                          divisions: 20,
-                          labels: RangeLabels(
-                            '\$${tempPriceRange.start.toStringAsFixed(0)}',
-                            '\$${tempPriceRange.end.toStringAsFixed(0)}',
-                          ),
-                          onChanged: (values) => setState(() {
-                            tempPriceRange = values;
-                            tempIsPriceFilterActive = true;
-                          }),
-                        ),
-                        SizedBox(height: 20),
-                        Text('Location',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
-                        SizedBox(height: 8),
-                        LocationPickerWidget(
-                          onLocationSelected: (address, lat, lng) {
-                            // Handle the selected location here
-                            print('Selected address: $address');
-                            print('Latitude: $lat, Longitude: $lng');
-                          },
-                        ),
-                        SizedBox(height: 20),
-                        Text('Time Frame',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
-                        DropdownButton<String>(
-                          value: tempTimeFrame,
-                          isExpanded: true,
-                          hint: Text('Select Time Frame'),
-                          items: [
-                            DropdownMenuItem(
-                                value: null, child: Text('All Time')),
-                            ...timeFrames.keys.map((String time) {
-                              return DropdownMenuItem(
-                                  value: time, child: Text(time));
-                            }).toList(),
-                          ],
-                          onChanged: (value) =>
-                              setState(() => tempTimeFrame = value),
-                        ),
-                        SizedBox(height: 20),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            TextButton(
-                              child: Text('Reset'),
-                              onPressed: () {
-                                setState(() {
-                                  tempPriceRange = const RangeValues(0, 1000);
-                                  tempIsPriceFilterActive = false;
-                                  tempCountry = null;
-                                  tempState = null;
-                                  tempCity = null;
-                                  tempTimeFrame = null;
-                                  tempFormattedAddress = null;
-                                });
-                              },
-                            ),
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange,
-                              ),
-                              child: Text('Apply Filters'),
-                              onPressed: () async {
-                                // Apply filters
-                                priceRange = tempPriceRange;
-                                isPriceFilterActive = tempIsPriceFilterActive;
-                                selectedCountry = tempCountry;
-                                selectedState = tempState;
-                                selectedCity = tempCity;
-                                selectedTimeFrame = tempTimeFrame;
-
-                                Navigator.pop(context);
-                                _loadingController.add(true);
-                                await Future.delayed(Duration(seconds: 2));
-                                _loadingController.add(false);
-                              },
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            );
-          },
-        );
-      },
-    );
+  void resetAllFiltersExceptCategory() {
+    reset(preserveCategory: true);
+    _loadingController.add(false);
   }
 
   Query getFilteredQuery() {
@@ -309,6 +137,157 @@ class FilterService {
     return query;
   }
 
+  Future<void> showFilterDialog(BuildContext context) async {
+    RangeValues tempPriceRange = priceRange;
+    bool tempIsPriceFilterActive = isPriceFilterActive;
+    String? tempCountry = selectedCountry;
+    String? tempState = selectedState;
+    String? tempCity = selectedCity;
+    String? tempTimeFrame = selectedTimeFrame;
+
+    await showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text('Filter Options'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Price Range',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    RangeSlider(
+                      values: tempPriceRange,
+                      min: 0,
+                      max: 1000,
+                      divisions: 20,
+                      labels: RangeLabels(
+                        '\$${tempPriceRange.start.toStringAsFixed(0)}',
+                        '\$${tempPriceRange.end.toStringAsFixed(0)}',
+                      ),
+                      onChanged: (values) => setState(() {
+                        tempPriceRange = values;
+                        tempIsPriceFilterActive = true;
+                      }),
+                    ),
+                    SizedBox(height: 16),
+                    Text('Location',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    SizedBox(height: 8),
+                    // CSC Picker Widget
+                    CSCPicker(
+                      layout: Layout.vertical,
+                      flagState: CountryFlag.ENABLE,
+                      dropdownDecoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey),
+                      ),
+                      disabledDropdownDecoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      countryDropdownLabel: "Select Country",
+                      stateDropdownLabel: "Select State",
+                      cityDropdownLabel: "Select City",
+
+                      selectedItemStyle: TextStyle(
+                        color: Colors.black,
+                        fontSize: 14,
+                      ),
+                      dropdownHeadingStyle: TextStyle(
+                        color: Colors.black,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      dropdownItemStyle: TextStyle(
+                        color: Colors.black,
+                        fontSize: 14,
+                      ),
+                      //                 defaultCountry: tempCountry != null
+                      // ? DefaultCountry.values.firstWhere(
+                      //     (c) => c.toString().split('.').last == tempCountry,
+                      //     orElse: () => DefaultCountry.INDIA) // Changed to INDIA
+                      // : DefaultCountry.INDIA, // Changed to INDIA
+
+                      onCountryChanged: (country) {
+                        setState(() => tempCountry = country);
+                      },
+                      onStateChanged: (state) {
+                        setState(() => tempState = state);
+                      },
+                      onCityChanged: (city) {
+                        setState(() => tempCity = city);
+                      },
+                    ),
+                    SizedBox(height: 16),
+                    Text('Time Frame',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    DropdownButton<String>(
+                      value: tempTimeFrame,
+                      isExpanded: true,
+                      hint: Text('Select Time Frame'),
+                      items: [
+                        DropdownMenuItem(value: null, child: Text('All Time')),
+                        ...timeFrames.keys.map((String time) {
+                          return DropdownMenuItem(
+                              value: time, child: Text(time));
+                        }).toList(),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => tempTimeFrame = value),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  child: Text('Reset'),
+                  onPressed: () {
+                    setState(() {
+                      tempPriceRange = const RangeValues(0, 1000);
+                      tempIsPriceFilterActive = false;
+                      tempCountry = null;
+                      tempState = null;
+                      tempCity = null;
+                      tempTimeFrame = null;
+                    });
+                  },
+                ),
+                TextButton(
+                  child: Text('Cancel'),
+                  onPressed: () => Navigator.pop(context),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                  ),
+                  child: Text('Apply'),
+                  onPressed: () async {
+                    // Apply filters
+                    priceRange = tempPriceRange;
+                    isPriceFilterActive = tempIsPriceFilterActive;
+                    selectedCountry = tempCountry;
+                    selectedState = tempState;
+                    selectedCity = tempCity;
+                    selectedTimeFrame = tempTimeFrame;
+
+                    Navigator.pop(context);
+                    _loadingController.add(true);
+                    await Future.delayed(Duration(seconds: 2));
+                    _loadingController.add(false);
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   String _getEmptyStateMessage() {
     List<String> conditions = [];
 
@@ -336,6 +315,15 @@ class FilterService {
     }
 
     return 'No items found with ${conditions.join(", ")}';
+  }
+
+  void resetAllFilters() {
+    priceRange = const RangeValues(0, 1000);
+    isPriceFilterActive = false;
+    selectedCity = null;
+    selectedCountry = null;
+    selectedTimeFrame = null;
+    _loadingController.add(false);
   }
 
   Widget buildEmptyState() {
@@ -380,46 +368,167 @@ class _LocationPickerWidgetState extends State<LocationPickerWidget> {
   String? selectedAddress;
   bool isLoading = false;
   bool isSaving = false;
-
-  // CSC Picker state
   String? selectedCountry;
   String? selectedState;
   String? selectedCity;
+  bool showManualInput = false;
 
-  void _showLocationOptions() {
-    showModalBottomSheet(
-      context: context,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+  @override
+  Widget build(BuildContext context) {
+    return _buildInlineContent();
+  }
+
+  Widget _buildInlineContent() {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
       ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Select Location Method',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Choose Location Method',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+            ),
+          ),
+          SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _buildMethodButton(
+                  icon: Icons.my_location,
+                  label: 'Use Current Location',
+                  onTap: _getCurrentLocation,
+                  isSelected: !showManualInput,
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: _buildMethodButton(
+                  icon: Icons.edit_location,
+                  label: 'Add Manually',
+                  onTap: () => setState(() => showManualInput = true),
+                  isSelected: showManualInput,
+                ),
+              ),
+            ],
+          ),
+          if (isLoading)
+            Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                ),
               ),
             ),
+          if (showManualInput) ...[
             SizedBox(height: 20),
-            ListTile(
-              leading: Icon(Icons.my_location),
-              title: Text('Use Current Location'),
-              onTap: () {
-                Navigator.pop(context);
-                _getCurrentLocation();
+            CSCPicker(
+              showStates: true,
+              showCities: true,
+              flagState: CountryFlag.ENABLE,
+              dropdownDecoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              onCountryChanged: (country) {
+                setState(() {
+                  selectedCountry = country;
+                  selectedState = null;
+                  selectedCity = null;
+                });
+              },
+              onStateChanged: (state) {
+                setState(() {
+                  selectedState = state;
+                  selectedCity = null;
+                });
+              },
+              onCityChanged: (city) {
+                setState(() {
+                  selectedCity = city;
+                  if (selectedCity != null &&
+                      selectedState != null &&
+                      selectedCountry != null) {
+                    selectedAddress =
+                        '$selectedCity, $selectedState, $selectedCountry';
+                    widget.onLocationSelected(selectedAddress!, 0, 0);
+                  }
+                });
               },
             ),
-            ListTile(
-              leading: Icon(Icons.edit_location),
-              title: Text('Add Manually'),
-              onTap: () {
-                Navigator.pop(context);
-                _showManualLocationPicker();
-              },
+          ],
+          if (selectedAddress != null) ...[
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      selectedAddress!,
+                      style: TextStyle(color: Colors.orange.shade800),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMethodButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    required bool isSelected,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.orange : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? Colors.orange : Colors.grey.shade300,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              color: isSelected ? Colors.white : Colors.grey.shade700,
+              size: 20,
+            ),
+            SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? Colors.white : Colors.grey.shade700,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
@@ -427,108 +536,12 @@ class _LocationPickerWidgetState extends State<LocationPickerWidget> {
     );
   }
 
-  bool get isCSCComplete =>
-      selectedCountry != null && selectedState != null && selectedCity != null;
-
-  void _showManualLocationPicker() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => Container(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-            left: 16,
-            right: 16,
-            top: 16,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Enter Location Details',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              SizedBox(height: 20),
-              CSCPicker(
-                showStates: true,
-                showCities: true,
-                flagState: CountryFlag.ENABLE,
-                dropdownDecoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey),
-                ),
-                onCountryChanged: (country) {
-                  setState(() {
-                    selectedCountry = country;
-                    selectedState = null;
-                    selectedCity = null;
-                  });
-                },
-                onStateChanged: (state) {
-                  setState(() {
-                    selectedState = state;
-                    selectedCity = null;
-                  });
-                },
-                onCityChanged: (city) {
-                  setState(() {
-                    selectedCity = city;
-                  });
-                },
-              ),
-              SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: !isCSCComplete || isSaving
-                      ? null
-                      : () async {
-                          setState(() => isSaving = true);
-                          await Future.delayed(Duration(seconds: 1));
-                          final address =
-                              '$selectedCity, $selectedState, $selectedCountry';
-                          this.setState(() {
-                            selectedAddress = address;
-                            isSaving = false;
-                          });
-                          widget.onLocationSelected(address, 0, 0);
-                          Navigator.pop(context);
-                        },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: isCSCComplete
-                        ? Colors.orange
-                        : null, // Set color to orange
-                    disabledBackgroundColor: Colors.grey[300],
-                  ),
-                  child: isSaving
-                      ? SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        )
-                      : Text('Save Location'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Future<void> _getCurrentLocation() async {
-    setState(() => isLoading = true);
+    setState(() {
+      isLoading = true;
+      showManualInput = false;
+    });
+
     try {
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
@@ -546,12 +559,19 @@ class _LocationPickerWidgetState extends State<LocationPickerWidget> {
 
       if (placemarks.isNotEmpty) {
         Placemark place = placemarks[0];
-        String address = '${place.street}, ${place.locality}, ${place.country}';
         setState(() {
-          selectedAddress = address;
+          selectedAddress =
+              '${place.street}, ${place.locality}, ${place.country}';
+          selectedCountry = place.country;
+          selectedState = place.administrativeArea;
+          selectedCity = place.locality;
         });
 
-        _showMapScreen(position);
+        widget.onLocationSelected(
+          selectedAddress!,
+          position.latitude,
+          position.longitude,
+        );
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -560,127 +580,6 @@ class _LocationPickerWidgetState extends State<LocationPickerWidget> {
     } finally {
       setState(() => isLoading = false);
     }
-  }
-
-  void _showMapScreen(Position position) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => Scaffold(
-          appBar: AppBar(
-            title: Text('Confirm Location'),
-          ),
-          body: Stack(
-            children: [
-              GoogleMap(
-                initialCameraPosition: CameraPosition(
-                  target: LatLng(position.latitude, position.longitude),
-                  zoom: 15,
-                ),
-                markers: {
-                  Marker(
-                    markerId: MarkerId('current'),
-                    position: LatLng(position.latitude, position.longitude),
-                  ),
-                },
-              ),
-              Positioned(
-                bottom: 16,
-                left: 16,
-                right: 16,
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          selectedAddress ?? '',
-                          textAlign: TextAlign.center,
-                        ),
-                        SizedBox(height: 8),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: isSaving
-                                ? null
-                                : () async {
-                                    setState(() => isSaving = true);
-                                    await Future.delayed(Duration(seconds: 1));
-                                    widget.onLocationSelected(
-                                      selectedAddress!,
-                                      position.latitude,
-                                      position.longitude,
-                                    );
-                                    setState(() => isSaving = false);
-                                    Navigator.pop(context);
-                                  },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.orange,
-                            ),
-                            child: isSaving
-                                ? SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(
-                                          Colors.white),
-                                    ),
-                                  )
-                                : Text('Confirm Location'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: isLoading ? null : _showLocationOptions,
-        style: ElevatedButton.styleFrom(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          alignment: Alignment.centerLeft,
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.location_on),
-            SizedBox(width: 8),
-            if (isLoading)
-              SizedBox(
-                height: 16,
-                width: 16,
-                child: Center(
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.black,
-                  ),
-                ),
-              )
-            else
-              Expanded(
-                child: Text(
-                  selectedAddress ?? 'Select Location',
-                  style:
-                      TextStyle(color: Colors.black), // Set text color to black
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 2,
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
   }
 }
 
